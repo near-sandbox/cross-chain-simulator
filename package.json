@@ -1,0 +1,43 @@
+{
+  "name": "@near-sandbox/cross-chain-simulator",
+  "version": "0.1.0",
+  "description": "NEAR Chain Signatures + cross-chain deterministic simulator for localnet",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "test": "echo 'No tests yet' && exit 0",
+    "prepublishOnly": "npm run build"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/near-sandbox/cross-chain-simulator.git"
+  },
+  "keywords": [
+    "near",
+    "chain-signatures",
+    "cross-chain",
+    "mpc",
+    "simulator",
+    "localnet"
+  ],
+  "author": "TelcoPay",
+  "license": "MIT",
+  "dependencies": {
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/uuid": "^9.0.7",
+    "typescript": "^5.3.3"
+  }
+}
