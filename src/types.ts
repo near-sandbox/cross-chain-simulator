@@ -38,6 +38,18 @@ export interface SignatureResponse {
   signedPayload: string;
 }
 
+/**
+ * IChainSignatures - Chain Signatures Interface
+ * 
+ * IMPLEMENTATION NOTE: Current simulator uses mocks. Real implementation
+ * must integrate with NEAR MPC network from github.com/near/mpc and
+ * v1.signer contract on localnet.
+ * 
+ * Real implementation should:
+ * - Call v1.signer contract for address derivation
+ * - Use real MPC nodes for signature generation
+ * - Perform real threshold signature verification
+ */
 export interface IChainSignatures {
   deriveAddress(
     nearAccount: string,

@@ -1,18 +1,21 @@
 {
   "name": "@near-sandbox/cross-chain-simulator",
   "version": "0.1.0",
-  "description": "NEAR Chain Signatures + cross-chain deterministic simulator for localnet",
+  "description": "NEAR Chain Signatures with real MPC integration for localnet. NOTE: Current implementation uses temporary mocks - see ARCHITECTURE.md for implementation status.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
     "watch": "tsc --watch",
     "test": "echo 'No tests yet' && exit 0",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "_comment": "TODO: Add start:localnet and stop:localnet scripts after MPC integration"
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "ARCHITECTURE.md",
+    "IMPLEMENTATION_GUIDE.md"
   ],
   "publishConfig": {
     "access": "public",

@@ -1,8 +1,31 @@
 /**
- * Address Derivation Logic
+ * AddressDerivation - TEMPORARY MOCK IMPLEMENTATION
  * 
- * Deterministic address derivation for various chains
- * Simulates MPC-based derivation for localnet testing
+ * WARNING: This deterministic derivation MUST be replaced with real
+ * v1.signer contract calls.
+ * 
+ * Real implementation should:
+ * - Call v1.signer contract's public_key method
+ * - Use MPC-derived public keys from real threshold signatures
+ * - Return cryptographically secure addresses
+ * 
+ * Current mock implementation:
+ * - Uses hash-based deterministic derivation
+ * - Does NOT call v1.signer contract
+ * - Does NOT use real MPC public keys
+ * 
+ * See: https://github.com/near/mpc for MPC architecture
+ * 
+ * TODO: Replace with real contract integration:
+ * ```typescript
+ * const account = await near.account('v1.signer-dev.testnet');
+ * const result = await account.viewFunction({
+ *   contractId: 'v1.signer-dev.testnet',
+ *   methodName: 'public_key',
+ *   args: { path: `${nearAccount},${chain}` }
+ * });
+ * return result.public_key; // Real MPC-derived key
+ * ```
  */
 
 import { createHash } from 'crypto';

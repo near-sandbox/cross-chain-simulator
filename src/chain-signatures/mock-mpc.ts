@@ -1,7 +1,23 @@
 /**
- * Mock MPC Service
+ * MockMPCService - TEMPORARY PLACEHOLDER
  * 
- * Simulates NEAR's 8-node MPC network for threshold signatures
+ * WARNING: This is a mock implementation that MUST be replaced with real
+ * MPC node integration from https://github.com/near/mpc
+ * 
+ * TODO: Replace with real MPC integration that:
+ * - Deploys 3-8 MPC nodes from near/mpc repository
+ * - Connects to v1.signer-dev.testnet contract
+ * - Performs real threshold signature generation
+ * - Uses real Beaver triple generation
+ * 
+ * DO NOT use this mock for anything beyond basic interface testing.
+ * 
+ * Real implementation should:
+ * - Integrate with NEAR MPC nodes from github.com/near/mpc
+ * - Use real threshold ECDSA signatures (cait-sith)
+ * - Perform real multi-round MPC protocol
+ * - Generate real Beaver triples and presignatures
+ * - Call v1.signer contract for signature storage
  */
 
 import { createHash } from 'crypto';

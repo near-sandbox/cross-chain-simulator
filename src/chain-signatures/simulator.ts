@@ -1,8 +1,19 @@
 /**
- * Chain Signatures Simulator
+ * ChainSignaturesSimulator - TEMPORARY IMPLEMENTATION WITH MOCKS
  * 
- * Simulates NEAR's Chain Signatures (MPC) for multi-chain account control
- * Enables single NEAR account to control BTC, ETH, DOGE, etc.
+ * WARNING: This class currently uses MOCK implementations:
+ * - MockMPCService (instead of real MPC nodes)
+ * - AddressDerivation (instead of v1.signer contract calls)
+ * 
+ * This is INCORRECT for the intended architecture. See ARCHITECTURE.md and
+ * IMPLEMENTATION_GUIDE.md for details on replacing with real implementations.
+ * 
+ * Intended Architecture:
+ * - Real MPC nodes from github.com/near/mpc
+ * - Real v1.signer contract calls
+ * - Real threshold signature generation
+ * 
+ * Current implementation is ~20% complete - only interfaces are correct.
  */
 
 import {
@@ -18,10 +29,12 @@ import { MockMPCService } from './mock-mpc';
 import { createHash } from 'crypto';
 
 export class ChainSignaturesSimulator implements IChainSignatures, ICrossChainExec {
+  // TODO: Replace MockMPCService with real MPC node integration
   private mpc: MockMPCService;
   private addressCache: Map<string, DerivedAddress> = new Map();
 
   constructor() {
+    // TODO: Initialize real MPC service instead of mock
     this.mpc = new MockMPCService();
   }
 
