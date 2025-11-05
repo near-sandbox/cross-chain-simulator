@@ -2,7 +2,13 @@
  * Factory for creating Chain Signatures client (simulator or production)
  */
 
-import { getConfig } from './config';
+import { 
+  getConfig, 
+  LocalnetConfig, 
+  getNearRpcUrl, 
+  getMpcContractId, 
+  getMpcNodes 
+} from './config';
 import { ChainSignaturesSimulator } from './chain-signatures/simulator';
 import { IChainSignatures, ICrossChainExec, SupportedChain, DerivedAddress, SignatureRequest, SignatureResponse } from './types';
 
@@ -24,11 +30,22 @@ export class ProductionMPCClient implements IChainSignatures, ICrossChainExec {
   }
 }
 
-export function createChainSignaturesClient(): IChainSignatures & ICrossChainExec {
-  const config = getConfig();
+export function createChainSignaturesClient(
+  config?: LocalnetConfig
+): IChainSignatures & ICrossChainExec {
+  const envConfig = getConfig();
 
-  if (config.useSimulators) {
-    return new ChainSignaturesSimulator();
+  if (envConfig.useSimulators) {
+    // Use provided config or create default from environment
+    if (!config) {
+      config = {
+        rpcUrl: getNearRpcUrl(),
+        networkId: 'localnet',
+        mpcContractId: getMpcContractId(),
+        mpcNodes: getMpcNodes(),
+      };
+    }
+    return new ChainSignaturesSimulator(config);
   } else {
     return new ProductionMPCClient();
   }

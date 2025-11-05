@@ -1,29 +1,81 @@
 # Dependencies
 node_modules/
-package-lock.json
-yarn.lock
 
 # Build output
 dist/
-build/
-*.tsbuildinfo
+*.js
+*.d.ts
+*.js.map
+*.d.ts.map
 
-# Environment variables
+# CDK
+cdk.out/
+.cdk.staging/
+cdk.context.json
+
+# Contracts
+contracts/*.wasm
+
+# Environment and Secrets
 .env
 .env.local
 .env.*.local
+*.env
+!.env.example
+
+# Private Keys and Secrets
+*private*
+*secret*
+*key*.pem
+*key*.txt
+*.key
+*.pem
+*.p12
+*.pfx
+credentials.json
+secrets.json
+encrypted*.txt
+encrypted*.json
+
+# AWS Credentials
+.aws/
+aws-credentials.*
+aws-secrets.*
+*aws-secret*
+*aws-key*
+
+# KMS and Encrypted Data
+*encrypted-key*
+*deployer-key*
+*master-key*
+*kms-key*
+encrypted-keys/
+.secrets/
+
+# NEAR Account Keys
+*account-key*
+*account-keys/
+.near-keys/
+*.near-key
 
 # IDE
 .vscode/
 .idea/
-.DS_Store
 *.swp
 *.swo
-*.iml
+*~
 
 # OS
+.DS_Store
 Thumbs.db
 
 # Logs
 *.log
 npm-debug.log*
+
+# Test
+coverage/
+
+# Lock files (keep package-lock.json, ignore others)
+yarn.lock
+pnpm-lock.yaml

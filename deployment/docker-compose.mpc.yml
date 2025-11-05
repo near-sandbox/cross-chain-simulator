@@ -1,0 +1,104 @@
+# Docker Compose configuration for NEAR MPC Network
+# References: https://github.com/near/mpc
+#
+# This file orchestrates 3 MPC nodes for localnet development.
+# Each node runs:
+# - NEAR Indexer: Tracks v1.signer contract shard
+# - MPC Signing: Threshold ECDSA using cait-sith
+# - Beaver Triple Generation: Background process
+# - Presignature Generation: Background process
+#
+# NEAR RPC Configuration:
+# - Default: http://host.docker.internal:3030 (localhost from Docker)
+# - EC2 Instance: http://54.90.246.254:3030 (set via NEAR_RPC_URL env var)
+# - See src/config.ts for single source of truth
+#
+# To use:
+# 1. Clone github.com/near/mpc repository
+# 2. Build images using: deployment/build-images.sh
+# 3. Update image references below to match your built images
+# 4. Configure NEAR_RPC_URL environment variable (or use default from config.ts)
+#    - Localhost: export NEAR_RPC_URL=http://localhost:3030
+#    - EC2: export NEAR_RPC_URL=http://54.90.246.254:3030
+# 5. Run: npm run start:mpc (or docker-compose -f deployment/docker-compose.mpc.yml up -d)
+
+version: '3.8'
+
+services:
+  mpc-node-0:
+    # TODO: Update image to match your built MPC image from github.com/near/mpc
+    # Build instructions: https://github.com/near/mpc#readme
+    image: near/mpc-node:latest
+    container_name: mpc-node-0
+    ports:
+      - "3000:3000"
+    environment:
+      - NEAR_RPC_URL=${NEAR_RPC_URL:-http://host.docker.internal:3030}
+      - MPC_CONTRACT_ID=${MPC_CONTRACT_ID:-v1.signer.node0}
+      - NODE_INDEX=0
+      - TOTAL_NODES=3
+      - IS_LEADER=true
+    volumes:
+      - mpc-node-0-data:/data
+    networks:
+      - mpc-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  mpc-node-1:
+    image: near/mpc-node:latest
+    container_name: mpc-node-1
+    ports:
+      - "3001:3000"
+    environment:
+      - NEAR_RPC_URL=${NEAR_RPC_URL:-http://host.docker.internal:3030}
+      - MPC_CONTRACT_ID=${MPC_CONTRACT_ID:-v1.signer.node0}
+      - NODE_INDEX=1
+      - TOTAL_NODES=3
+      - IS_LEADER=false
+    volumes:
+      - mpc-node-1-data:/data
+    networks:
+      - mpc-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  mpc-node-2:
+    image: near/mpc-node:latest
+    container_name: mpc-node-2
+    ports:
+      - "3002:3000"
+    environment:
+      - NEAR_RPC_URL=${NEAR_RPC_URL:-http://host.docker.internal:3030}
+      - MPC_CONTRACT_ID=${MPC_CONTRACT_ID:-v1.signer.node0}
+      - NODE_INDEX=2
+      - TOTAL_NODES=3
+      - IS_LEADER=false
+    volumes:
+      - mpc-node-2-data:/data
+    networks:
+      - mpc-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  mpc-node-0-data:
+  mpc-node-1-data:
+  mpc-node-2-data:
+
+networks:
+  mpc-network:
+    driver: bridge
+

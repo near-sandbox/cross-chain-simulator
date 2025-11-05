@@ -9,7 +9,13 @@
     "watch": "tsc --watch",
     "test": "echo 'No tests yet' && exit 0",
     "prepublishOnly": "npm run build",
-    "_comment": "TODO: Add start:localnet and stop:localnet scripts after MPC integration"
+    "start:mpc": "./scripts/start-mpc.sh",
+    "stop:mpc": "./scripts/stop-mpc.sh",
+    "start:localnet": "./scripts/start-localnet.sh",
+    "stop:localnet": "./scripts/stop-localnet.sh",
+    "cdk:synth": "cdk synth",
+    "cdk:deploy": "cdk deploy",
+    "cdk:destroy": "cdk destroy"
   },
   "files": [
     "dist",
@@ -36,11 +42,19 @@
   "author": "TelcoPay",
   "license": "MIT",
   "dependencies": {
+    "@aws-sdk/client-kms": "^3.654.0",
+    "@aws-sdk/client-secrets-manager": "^3.925.0",
+    "near-api-js": "^2.1.0",
     "uuid": "^9.0.1"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
     "@types/uuid": "^9.0.7",
-    "typescript": "^5.3.3"
+    "aws-cdk": "^2.1031.1",
+    "aws-cdk-lib": "^2.222.0",
+    "constructs": "^10.4.2",
+    "source-map-support": "^0.5.21",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
   }
 }

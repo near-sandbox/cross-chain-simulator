@@ -25,68 +25,52 @@ The `cross-chain-simulator` provides **real NEAR Chain Signatures (MPC)** infras
 
 ### Current Implementation Status
 
-**CRITICAL**: The current implementation uses **MOCK** components which are **INCORRECT** for the intended architecture. This module should use **REAL MPC infrastructure**, not simulations.
+**Phase 1-2 Complete**: Real MPC integration and v1.signer contract calls are now implemented. The module uses **REAL MPC infrastructure** for localnet development.
 
-## Critical Architecture Gaps
+## Implementation Status
 
-### 1. Mock MPC Implementation
+### ✅ Completed (Phase 1-2)
 
-**Current**: `MockMPCService` simulates MPC signature generation
+1. **Real MPC Implementation** ✅
+   - `MPCService` integrates with real MPC nodes from [github.com/near/mpc](https://github.com/near/mpc)
+   - Real threshold ECDSA signatures (cait-sith)
+   - Real signature generation via MPC network
 
-**Should Be**: Real MPC node integration from [github.com/near/mpc](https://github.com/near/mpc)
-- Real 3-8 node MPC network
-- Real threshold ECDSA signatures (cait-sith)
-- Real Beaver triple generation
-- Real presignature generation
-- Real signature aggregation
+2. **v1.signer Contract Integration** ✅
+   - `NearClient` calls real contract `public_key` method for address derivation
+   - `NearClient` calls real contract `sign` method for signature requests
+   - Real MPC-derived public keys
+   - Real on-chain state management
 
-### 2. Missing v1.signer Contract Integration
+3. **LocalnetConfig Exports** ✅
+   ```typescript
+   export interface LocalnetConfig {
+     rpcUrl: string;
+     networkId: 'localnet';
+     mpcContractId: string;
+     mpcNodes: string[];
+     headers?: Record<string, string>;
+   }
+   
+   export function getNearRpcUrl(): string;
+   export function getMpcContractId(): string;
+   export function getMpcNodes(): string[];
+   ```
 
-**Current**: Deterministic address derivation via hash functions
+4. **MPC Infrastructure Orchestration** ✅
+   - `npm run start:mpc` - Start MPC network via Docker
+   - `npm run stop:mpc` - Stop MPC network
+   - Docker Compose configuration for MPC nodes
+   - MPC node health checks
 
-**Should Be**: Real contract calls to `v1.signer-dev.testnet`
-- Call `public_key` method for address derivation
-- Call `sign` method for signature requests
-- Real MPC-derived public keys
-- Real on-chain state management
+### 🚧 Pending (Phase 3)
 
-### 3. Missing LocalnetConfig Exports
-
-**Current**: No configuration exports
-
-**Should Be**: 
-```typescript
-export interface LocalnetConfig {
-  rpcUrl: string;              // From AWS Node Runner
-  networkId: 'localnet';
-  mpcContractId: string;       // v1.signer-dev.testnet
-  mpcNodes: string[];          // MPC node endpoints
-  headers?: Record<string, string>;
-}
-
-export function getNearRpcUrl(): string;
-export function getMpcContractId(): string;
-export function getMpcNodes(): string[];
-```
-
-### 4. Missing Infrastructure Orchestration
-
-**Current**: No infrastructure scripts
-
-**Should Be**:
-- `npm run start:localnet` - Deploy NEAR node + start MPC network
-- `npm run stop:localnet` - Stop all infrastructure
-- Docker orchestration for MPC nodes
-- CDK stack deployment for NEAR node
-
-### 5. Missing AWS Node Runner Dependency
-
-**Current**: No dependency
-
-**Should Be**: Import NEAR node CDK stack from `aws-blockchain-node-runners`
-- Extend base stack (per AWS CDK best practices)
-- Only modify `/lib/near` directory
-- Export RPC endpoint configuration
+5. **AWS Node Runner Integration** 🚧
+   - Import NEAR node CDK stack from `aws-blockchain-node-runners`
+   - Extend base stack (per AWS CDK best practices)
+   - Only modify `/lib/near` directory
+   - Export RPC endpoint configuration
+   - Complete `start:localnet` and `stop:localnet` scripts
 
 ## Intended Architecture
 
@@ -205,12 +189,14 @@ const adapter = new LocalnetMPCAdapter(config);
 
 ## Implementation Status
 
-**Current Completion**: ~20%
+**Current Completion**: ~70% (Phase 1-2 Complete)
 
 - ✅ Interface definitions (10%)
 - ✅ Project structure (10%)
-- ❌ Real MPC integration (should be 40% - MISSING)
-- ❌ Infrastructure orchestration (should be 40% - MISSING)
+- ✅ Real MPC integration (40% - COMPLETE)
+- ✅ LocalnetConfig exports (10% - COMPLETE)
+- ✅ MPC infrastructure scripts (10% - COMPLETE)
+- 🚧 AWS Node Runner integration (20% - PENDING Phase 3)
 
 ## Next Steps
 
