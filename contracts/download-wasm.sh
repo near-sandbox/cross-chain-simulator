@@ -24,8 +24,8 @@ if command -v near &> /dev/null; then
     fi
 fi
 
-# Option 2: Try to build from source
-echo "Attempting to build from source..."
+# Option 2: Try to use pre-built WASM from archive
+echo "Attempting to get pre-built WASM from archive..."
 TEMP_DIR=$(mktemp -d)
 cd "$TEMP_DIR"
 
@@ -33,10 +33,21 @@ if git clone --depth 1 https://github.com/near/mpc.git 2>/dev/null; then
     echo "✅ Cloned MPC repository"
     cd mpc
     
-    # Look for contract directory
-    if [ -d "contract" ]; then
-        cd contract
-        echo "Building contract..."
+    # Check for pre-built WASM in archive
+    if [ -d "crates/contract_history/archive" ]; then
+        ARCHIVE_WASM=$(ls -t crates/contract_history/archive/*.wasm 2>/dev/null | head -1)
+        if [ -n "$ARCHIVE_WASM" ] && [ -f "$ARCHIVE_WASM" ]; then
+            cp "$ARCHIVE_WASM" "$WASM_FILE"
+            echo "✅ Copied pre-built WASM from archive: $(basename $ARCHIVE_WASM)"
+            rm -rf "$TEMP_DIR"
+            exit 0
+        fi
+    fi
+    
+    # Fallback: Try to build from source
+    if [ -d "crates/contract" ]; then
+        cd crates/contract
+        echo "Building contract from source..."
         if cargo build --release --target wasm32-unknown-unknown 2>/dev/null; then
             CONTRACT_WASM=$(find target/wasm32-unknown-unknown/release -name "*.wasm" | head -1)
             if [ -n "$CONTRACT_WASM" ]; then

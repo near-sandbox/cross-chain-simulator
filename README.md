@@ -174,31 +174,39 @@ npm run stop:mpc
 
 ### Configuring NEAR RPC Endpoint
 
-The RPC URL is centralized in `src/config.ts` as the single source of truth.
+The RPC URL is centralized in `src/config.ts` as the single source of truth. The `getNearRpcUrl()` function reads from `NEAR_RPC_URL` environment variable (highest priority) or defaults to `http://localhost:3030`.
 
-**Option 1: Use localhost (default)**
+**Option 1: Use AWSNodeRunner exported configuration (Recommended)**
+```bash
+# Load configuration exported by AWSNodeRunner
+source ../AWSNodeRunner/lib/near/.env.localnet
+export NEAR_RPC_URL  # Ensure it's exported to child processes
+npm run start:mpc
+```
+
+**Option 2: Use localhost (default)**
 ```bash
 # No configuration needed - uses http://localhost:3030
+# Requires SSM port forwarding if using AWSNodeRunner
 npm run start:mpc
 ```
 
-**Option 2: Use EC2 instance**
+**Option 3: Manual environment variable**
 ```bash
 # Set environment variable before starting
-export NEAR_RPC_URL=http://54.90.246.254:3030
+export NEAR_RPC_URL=http://10.0.5.132:3030  # Use private IP from AWSNodeRunner
 npm run start:mpc
 ```
 
-**Option 3: Change default in config.ts**
+**Option 4: Change default in config.ts**
 Edit `src/config.ts` and change `DEFAULT_NEAR_RPC_URL` constant:
 ```typescript
-const DEFAULT_NEAR_RPC_URL = 'http://54.90.246.254:3030';
+const DEFAULT_NEAR_RPC_URL = 'http://10.0.5.132:3030';
 ```
 
-The EC2 instance details:
-- Instance ID: `i-05fce3d18e6b1ba8b`
-- Public IP: `54.90.246.254`
-- Port: `3030` (open from 0.0.0.0)
+**Note**: If using AWSNodeRunner, the RPC URL uses a private IP address. You'll need:
+- VPC access (Lambda/EC2 in same VPC), OR
+- SSM port forwarding (see AWSNodeRunner docs for setup)
 
 ### Contract Deployment
 

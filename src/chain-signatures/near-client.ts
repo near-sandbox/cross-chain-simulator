@@ -128,8 +128,8 @@ export class NearClient {
           payload: params.payload,
           recipient: params.recipient,
         },
-        gas: '300000000000000', // 300 TGas
-        attachedDeposit: '0',
+        gas: BigInt('300000000000000'), // 300 TGas
+        attachedDeposit: BigInt('0'),
       });
 
       // Extract signature_id from transaction result

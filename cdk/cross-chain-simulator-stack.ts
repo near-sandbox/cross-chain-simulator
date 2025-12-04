@@ -30,7 +30,7 @@ export interface CrossChainSimulatorStackProps extends cdk.StackProps {
   networkId?: string;
 
   /**
-   * Master account ID (default: test.near)
+   * Master account ID (default: test.node0 for localnet)
    */
   masterAccountId?: string;
 
@@ -168,7 +168,7 @@ export class CrossChainSimulatorStack extends cdk.Stack {
     });
 
     new cdk.CfnOutput(this, 'MasterAccountId', {
-      value: props.masterAccountId || 'test.near',
+      value: props.masterAccountId || 'test.node0',
       description: 'NEAR master account ID',
       exportName: `${this.stackName}-MasterAccountId`,
     });

@@ -20,15 +20,7 @@ fi
 if ! docker image inspect near/mpc-node:latest > /dev/null 2>&1; then
     echo "⚠️  MPC Node image (near/mpc-node:latest) not found locally."
     echo "🏗️  Building MPC image from source..."
-    echo "Debug: SCRIPT_DIR is $SCRIPT_DIR"
-    ls -la "$SCRIPT_DIR"
-    if [ -f "$SCRIPT_DIR/build-mpc-image.sh" ]; then
-        echo "✅ build-mpc-image.sh found"
-        "$SCRIPT_DIR/build-mpc-image.sh"
-    else
-        echo "❌ build-mpc-image.sh NOT found in $SCRIPT_DIR"
-        exit 1
-    fi
+    "$SCRIPT_DIR/build-mpc-image.sh"
 fi
 
 # Check if docker-compose is available
@@ -103,4 +95,3 @@ else
     echo "To view logs: $COMPOSE_CMD -f $COMPOSE_FILE logs -f"
     echo "To stop: npm run stop:mpc"
 fi
-

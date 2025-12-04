@@ -126,6 +126,9 @@ export class LocalnetOrchestrator {
       undefined // wasmPath - will use default contracts/v1.signer.wasm
     );
 
+    // Update config with actual contract ID (may have changed if timestamped)
+    this.config.mpcContractId = contractId;
+
     // 5. Start MPC nodes via Docker
     console.log('\n🔗 [ORCHESTRATOR] Starting MPC nodes...');
     await this.startMpcNodes(contractId);

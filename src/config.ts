@@ -104,9 +104,10 @@ export function getDeployerAccountId(): string {
 /**
  * Get master account ID from environment or default
  * Master account used to create deployer account
+ * For localnet, defaults to test.node0 (localnet accounts use .node0 suffix)
  */
 export function getMasterAccountId(): string {
-  return process.env.MASTER_ACCOUNT_ID || 'test.near';
+  return process.env.MASTER_ACCOUNT_ID || 'test.node0';
 }
 
 /**

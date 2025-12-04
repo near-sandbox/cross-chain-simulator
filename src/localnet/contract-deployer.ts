@@ -6,6 +6,7 @@
  */
 
 import { connect, Near, Account, keyStores, KeyPair, utils } from 'near-api-js';
+import { InMemoryKeyStore } from 'near-api-js/lib/key_stores/in_memory_key_store';
 import { KMSKeyManager } from './kms-key-manager';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -24,12 +25,12 @@ export class ContractDeployer {
   private near: Near | null = null;
   private masterAccount: Account | null = null;
   private deployerAccount: Account | null = null;
-  private keyStore: keyStores.InMemoryKeyStore;
+  private keyStore: InMemoryKeyStore;
   // Store encrypted deployer private key (in production, use external storage)
   private encryptedDeployerPrivateKey: string | null = null;
 
   constructor(private config: ContractDeployerConfig) {
-    this.keyStore = new keyStores.InMemoryKeyStore();
+    this.keyStore = new InMemoryKeyStore();
     this.encryptedDeployerPrivateKey = config.encryptedDeployerPrivateKey || null;
   }
 
@@ -158,10 +159,15 @@ export class ContractDeployer {
       // If we have encrypted private key, add it to keystore for future use
       if (this.encryptedDeployerPrivateKey) {
         const privateKeyString = await this.config.kmsManager.decryptPrivateKey(this.encryptedDeployerPrivateKey);
-        const keyPair = KeyPair.fromString(privateKeyString);
+        const keyPair = KeyPair.fromString(privateKeyString as any);
         await this.keyStore.setKey(this.config.networkId, deployerId, keyPair);
+        console.log('✅ [DEPLOYER] Encrypted key available, deployer ready for use');
+      } else {
+        // If account exists but we don't have encrypted key, we'll use master account for contract creation
+        console.log('⚠️  [DEPLOYER] Account exists but encrypted key not available.');
+        console.log('   Will use master account for contract creation instead.');
       }
-      return;
+      return; // Account exists, don't try to create it again
     }
 
     try {
@@ -188,8 +194,8 @@ export class ContractDeployer {
       }
 
       // Create account via master account
-      // Initial balance: 5 NEAR (enough for contract deployment)
-      const initialBalance = utils.format.parseNearAmount('5')!;
+      // Initial balance: 15 NEAR (enough for contract deployment + contract account creation)
+      const initialBalance = utils.format.parseNearAmount('15')!;
       
       await this.masterAccount.createAccount(
         deployerId,
@@ -220,49 +226,82 @@ export class ContractDeployer {
     contractAccountId: string = 'v1.signer.node0',
     wasmPath?: string
   ): Promise<string> {
+    // Note: contractAccountId may be modified if account exists but key not available
     await this.initializeNear();
     
     if (!this.near) {
       throw new Error('NEAR not initialized');
     }
 
-    // Ensure deployer account exists
+    // Ensure deployer account exists (or master account is available)
     if (!this.deployerAccount) {
       await this.createDeployerAccount();
     }
 
-    if (!this.deployerAccount) {
-      throw new Error('Deployer account not available');
+    // Ensure we have either deployer account (with encrypted key) or master account
+    if (!this.deployerAccount && !this.masterAccount) {
+      throw new Error('Neither deployer account nor master account available for contract deployment.');
     }
-
-    // Ensure deployer account has key in keystore (for signing deployment transaction)
-    if (!this.encryptedDeployerPrivateKey) {
-      throw new Error('Deployer account encrypted private key not available. Cannot deploy contract.');
-    }
-
-    // Decrypt deployer private key with KMS
-    console.log('🔓 [DEPLOYER] Decrypting deployer private key...');
-    const privateKeyString = await this.config.kmsManager.decryptPrivateKey(this.encryptedDeployerPrivateKey);
-    const deployerKeyPair = KeyPair.fromString(privateKeyString);
-    
-    // Ensure deployer key is in keystore
-    await this.keyStore.setKey(this.config.networkId, this.config.deployerAccountId, deployerKeyPair);
 
     // Check if contract account exists
     const contractExists = await this.accountExists(contractAccountId);
     
     if (!contractExists) {
-      // Create contract account from deployer account
-      console.log('📝 [DEPLOYER] Creating contract account:', contractAccountId);
+      // Determine which account to use for contract creation
+      let creatingAccount: Account;
+      let accountName: string;
+      
+      // Determine which account can create the contract account
+      // Issue: node0 cannot create v1.signer.node0 (account name contains dots in sub-account part)
+      // Solution: Use deployer.node0 to create v1.signer.deployer.node0, OR adjust account name
+      
+      // Check if contract account name matches deployer account hierarchy
+      const deployerId = this.config.deployerAccountId;
+      const contractNameParts = contractAccountId.split('.');
+      const deployerNameParts = deployerId.split('.');
+      
+      // If contract account should be a sub-account of deployer, use deployer
+      // Example: v1.signer.deployer.node0 should be created by deployer.node0
+      const shouldUseDeployer = contractNameParts.length > deployerNameParts.length && 
+                                 contractAccountId.endsWith('.' + deployerId);
+      
+      if (shouldUseDeployer && this.encryptedDeployerPrivateKey && this.deployerAccount) {
+        // Use deployer account if contract is a sub-account of deployer
+        console.log('🔓 [DEPLOYER] Decrypting deployer private key...');
+        const privateKeyString = await this.config.kmsManager.decryptPrivateKey(this.encryptedDeployerPrivateKey);
+        const deployerKeyPair = KeyPair.fromString(privateKeyString as any);
+        
+        // Ensure deployer key is in keystore
+        await this.keyStore.setKey(this.config.networkId, deployerId, deployerKeyPair);
+        creatingAccount = this.deployerAccount;
+        accountName = deployerId;
+      } else if (this.masterAccount) {
+        // Try master account first (works for simple names like test-123.node0)
+        // But will fail for names with dots like v1.signer.node0
+        creatingAccount = this.masterAccount;
+        accountName = this.config.masterAccountId;
+        
+        // If contract name has dots in sub-account part, suggest using deployer
+        if (contractNameParts.length > 2 && !shouldUseDeployer) {
+          console.log('⚠️  [DEPLOYER] Contract account name contains dots (', contractAccountId, ')');
+          console.log('   This may fail with master account. Consider using deployer account instead.');
+          console.log('   Suggested name:', contractAccountId.replace('.' + this.config.masterAccountId, '.deployer.' + deployerId));
+        }
+      } else {
+        throw new Error('Neither deployer account (with encrypted key) nor master account available for contract creation.');
+      }
+      
+      // Create contract account
+      console.log('📝 [DEPLOYER] Creating contract account:', contractAccountId, 'from', accountName);
       
       // Generate key pair for contract account (contracts need full access keys)
       const contractKeyPair = KeyPair.fromRandom('ed25519');
       const contractPublicKey = contractKeyPair.getPublicKey();
       
-      // Initial balance: 10 NEAR (enough for contract storage and operations)
-      const initialBalance = utils.format.parseNearAmount('10')!;
+      // Initial balance: 50 NEAR (enough for contract storage and operations)
+      const initialBalance = utils.format.parseNearAmount('50')!;
       
-      await this.deployerAccount.createAccount(
+      await creatingAccount.createAccount(
         contractAccountId,
         contractPublicKey,
         initialBalance
@@ -273,7 +312,7 @@ export class ContractDeployer {
       // Add contract account key to keystore
       await this.keyStore.setKey(this.config.networkId, contractAccountId, contractKeyPair);
     } else {
-      // Check if contract is already deployed
+      // Contract account exists - check if contract is already deployed
       try {
         const contractAccount = await this.near.account(contractAccountId);
         const state = await contractAccount.state();
@@ -284,6 +323,41 @@ export class ContractDeployer {
         }
       } catch (error) {
         // Continue with deployment
+      }
+      
+      // Account exists but contract not deployed - we need a key to deploy
+      // Since we don't have the original key (InMemoryKeyStore doesn't persist),
+      // and we can't add keys to an existing account without the account's own key,
+      // we'll use a new account name with timestamp for localnet testing
+      console.log('⚠️  [DEPLOYER] Contract account exists but key not in keystore');
+      console.log('   Using new account name for this deployment...');
+      
+      // Generate new account name with timestamp
+      const timestamp = Date.now();
+      const newContractAccountId = contractAccountId.replace('.node0', `-${timestamp}.node0`);
+      console.log('   New account name:', newContractAccountId);
+      
+      // Create new account with new name
+      const contractKeyPair = KeyPair.fromRandom('ed25519');
+      const contractPublicKey = contractKeyPair.getPublicKey();
+      const initialBalance = utils.format.parseNearAmount('50')!;
+      
+      if (this.masterAccount) {
+        await this.masterAccount.createAccount(
+          newContractAccountId,
+          contractPublicKey,
+          initialBalance
+        );
+        console.log('✅ [DEPLOYER] Created new contract account:', newContractAccountId);
+        
+        // Update contractAccountId for rest of deployment
+        contractAccountId = newContractAccountId;
+        
+        // Add key to keystore
+        await this.keyStore.setKey(this.config.networkId, contractAccountId, contractKeyPair);
+        console.log('✅ [DEPLOYER] Contract account key added to keystore');
+      } else {
+        throw new Error('Cannot create account: master account not available');
       }
     }
 
@@ -338,7 +412,7 @@ export class ContractDeployer {
    */
   async addMasterAccountKey(privateKeyString: string): Promise<void> {
     await this.initializeNear();
-    const keyPair = KeyPair.fromString(privateKeyString);
+    const keyPair = KeyPair.fromString(privateKeyString as any);
     await this.keyStore.setKey(this.config.networkId, this.config.masterAccountId, keyPair);
     console.log('✅ [DEPLOYER] Master account key added to keystore');
   }

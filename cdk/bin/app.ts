@@ -33,7 +33,7 @@ const explicitMasterKeyArn = app.node.tryGetContext('masterAccountKeyArn') || pr
 // If user provides RPC URL and master key ARN, assume Mode 1 (existing infrastructure)
 const useExistingInfrastructure = !!(explicitRpcUrl && explicitMasterKeyArn);
 
-const masterAccountId = app.node.tryGetContext('masterAccountId') || process.env.MASTER_ACCOUNT_ID || 'test.near';
+const masterAccountId = app.node.tryGetContext('masterAccountId') || process.env.MASTER_ACCOUNT_ID || 'test.node0';
 
 if (useExistingInfrastructure || !deployNearNode) {
   // Mode 1: Existing Infrastructure
