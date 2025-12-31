@@ -406,21 +406,38 @@ export class LocalnetOrchestrator {
     }
 
     // Check MPC nodes
-    console.log('   Checking MPC nodes...');
+    const mpcHealthMode =
+      process.env.MPC_NODE_HEALTHCHECK ||
+      (useMpcSetup ? 'best_effort' : 'strict');
+
+    if (mpcHealthMode === 'skip' || mpcHealthMode === 'false') {
+      console.log('   Skipping MPC node health checks (MPC_NODE_HEALTHCHECK=skip)');
+      return;
+    }
+
+    console.log(`   Checking MPC nodes (${mpcHealthMode})...`);
     for (const nodeUrl of this.config.mpcNodes) {
+      let ok = false;
       for (let i = 0; i < maxAttempts; i++) {
         try {
           const response = await fetch(`${nodeUrl}/health`);
           if (response.ok) {
             console.log(`   ✅ ${nodeUrl} ready`);
+            ok = true;
             break;
           }
         } catch (error) {
-          if (i === maxAttempts - 1) {
-            throw new Error(`MPC node ${nodeUrl} health check failed`);
-          }
+          // ignore and retry below
         }
         await new Promise(resolve => setTimeout(resolve, pollInterval));
+      }
+
+      if (!ok) {
+        const msg = `MPC node ${nodeUrl} health check failed`;
+        if (mpcHealthMode === 'strict') {
+          throw new Error(msg);
+        }
+        console.warn(`   ⚠️  ${msg} (continuing; likely VPC-only endpoint)`);
       }
     }
   }
