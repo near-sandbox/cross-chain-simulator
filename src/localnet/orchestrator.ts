@@ -7,7 +7,9 @@
 
 import { ContractDeployer } from './contract-deployer';
 import { KMSKeyManager } from './kms-key-manager';
-import { LocalnetConfig, getNearRpcUrl, getMpcContractId, getMpcNodes, getDeployerAccountId, getMasterAccountId, getDeployerKmsKeyId, getMasterAccountKeyArn } from '../config';
+import { MpcSetup, MpcSetupOptions } from './mpc-setup';
+import { InfrastructureConfigReader } from '../aws/infrastructure-config';
+import { LocalnetConfig, getNearRpcUrl, getMpcContractId, getMpcNodes, getDeployerAccountId, getMasterAccountId, getDeployerKmsKeyId, getMasterAccountKeyArn, getMpcStackName, getNearStackName, getAwsRegion, getAwsProfile } from '../config';
 import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -30,6 +32,10 @@ export interface OrchestratorConfig {
   masterAccountPrivateKey?: string;
   // Optional: AWS region for Secrets Manager (defaults to us-east-1)
   region?: string;
+  // Optional: Use new MPC setup module (default: false, uses legacy deployer)
+  useMpcSetup?: boolean;
+  // Optional: Threshold for MPC signing (default: 2)
+  mpcThreshold?: number;
 }
 
 export class LocalnetOrchestrator {
@@ -47,9 +53,10 @@ export class LocalnetOrchestrator {
     const kmsKeyId = config.kmsKeyId || getDeployerKmsKeyId();
     this.region = config.region || process.env.AWS_REGION || 'us-east-1';
 
-    if (!kmsKeyId) {
-      throw new Error('KMS key ID is required. Set DEPLOYER_KMS_KEY_ID environment variable.');
-    }
+    // Determine which path we're using (MPC Setup is default)
+    const useMpcSetup = config.useMpcSetup !== undefined 
+      ? config.useMpcSetup 
+      : process.env.USE_MPC_SETUP !== 'false';  // Defaults to true
 
     // Validate key source (must have one)
     const masterKeyArn = config.masterAccountKeyArn || getMasterAccountKeyArn();
@@ -68,6 +75,12 @@ export class LocalnetOrchestrator {
       console.warn('⚠️  [ORCHESTRATOR] Both masterAccountKeyArn and masterAccountPrivateKey provided. Using ARN (preferred).');
     }
 
+    // Only require KMS and create ContractDeployer for legacy path
+    if (!useMpcSetup) {
+      if (!kmsKeyId) {
+        throw new Error('KMS key ID is required for legacy ContractDeployer path. Set DEPLOYER_KMS_KEY_ID environment variable.');
+    }
+
     const kmsManager = new KMSKeyManager({
       keyId: kmsKeyId,
       region: this.region,
@@ -81,10 +94,18 @@ export class LocalnetOrchestrator {
       kmsManager,
       encryptedDeployerPrivateKey: config.encryptedDeployerPrivateKey,
     });
+    } else {
+      // MPC Setup path doesn't need ContractDeployer or KMS
+      this.deployer = undefined as any; // Will not be used in MPC Setup path
+    }
 
     // Store key source for later use in start()
     this.masterAccountKeyArn = masterKeyArn;
     this.masterAccountPrivateKey = masterKeyDirect;
+
+    // Store MPC setup options
+    (this as any).useMpcSetup = useMpcSetup;
+    (this as any).mpcThreshold = config.mpcThreshold;
 
     this.config = {
       rpcUrl,
@@ -102,6 +123,34 @@ export class LocalnetOrchestrator {
     console.log('   RPC URL:', this.config.rpcUrl);
     console.log('   Contract:', this.config.mpcContractId);
 
+    // Check if using new MPC setup module
+    // DEFAULT TO TRUE for production-equivalent deployment
+    const useMpcSetup = (this as any).useMpcSetup !== undefined 
+      ? (this as any).useMpcSetup 
+      : process.env.USE_MPC_SETUP !== 'false';  // Changed: Now defaults to TRUE
+
+    if (useMpcSetup) {
+      // Use new MPC setup module (reads from AWS infrastructure)
+      // This is the PRODUCTION-EQUIVALENT path that:
+      // - Initializes contract with init()
+      // - Votes to add domains (Secp256k1 for ECDSA)
+      // - Triggers distributed key generation
+      // - Ready for signing after keys generate
+      console.log('\n📦 [ORCHESTRATOR] Using MPC Setup module (production-equivalent path)...');
+      return await this.setupMpcApplicationLayer();
+    } else {
+      // Legacy flow (uses contract deployer)
+      // Only use if explicitly set USE_MPC_SETUP=false
+      console.log('\n⚠️  [ORCHESTRATOR] Using legacy path (incomplete initialization)');
+      console.log('   Set USE_MPC_SETUP=true for production-equivalent deployment');
+      return await this.startLegacy();
+    }
+  }
+
+  /**
+   * Legacy start flow (uses ContractDeployer)
+   */
+  private async startLegacy(): Promise<LocalnetConfig> {
     // 1. Verify EC2 NEAR RPC is accessible
     console.log('\n📡 [ORCHESTRATOR] Verifying RPC connection...');
     await this.verifyRpcConnection();
@@ -144,6 +193,59 @@ export class LocalnetOrchestrator {
     return {
       ...this.config,
       mpcContractId: contractId,
+    };
+  }
+
+  /**
+   * Setup MPC application layer on top of deployed infrastructure
+   * Reads infrastructure state from AWS and configures the chain
+   */
+  async setupMpcApplicationLayer(): Promise<LocalnetConfig> {
+    console.log('\n📡 [ORCHESTRATOR] Reading infrastructure state from AWS...');
+
+    // 1. Get infrastructure configuration
+    const reader = new InfrastructureConfigReader({
+      region: this.region,
+      profile: getAwsProfile(),
+      nearStackName: getNearStackName(),
+      mpcStackName: getMpcStackName(),
+    });
+    const infraConfig = await reader.getInfrastructureConfig();
+
+    // 2. Get master account key
+    console.log('\n🔑 [ORCHESTRATOR] Retrieving master account key...');
+    const masterKey = await this.getMasterAccountKey();
+
+    // 3. Setup MPC network (creates accounts, deploys contract, initializes)
+    console.log('\n🔧 [ORCHESTRATOR] Setting up MPC network...');
+    const mpcSetup = new MpcSetup({
+      infrastructureConfig: infraConfig,
+      masterAccountPrivateKey: masterKey,
+      wasmPath: undefined, // Use default contracts/v1.signer.wasm
+      threshold: (this as any).mpcThreshold || 2,
+      region: this.region,
+      profile: getAwsProfile(),
+    });
+
+    const result = await mpcSetup.setupMpcNetwork();
+
+    // 4. Update config with actual values from infrastructure
+    this.config.rpcUrl = infraConfig.near.rpcUrl;
+    this.config.mpcContractId = result.contractId;
+    this.config.mpcNodes = result.participants.map((p) => p.url);
+
+    // 5. Wait for services to be ready
+    console.log('\n⏳ [ORCHESTRATOR] Waiting for services to be ready...');
+    await this.healthCheck();
+
+    console.log('\n✅ [ORCHESTRATOR] MPC application layer ready!');
+    console.log('   Contract:', result.contractId);
+    console.log('   MPC Nodes:', this.config.mpcNodes.join(', '));
+    console.log('   Participants:', result.participants.length);
+
+    return {
+      ...this.config,
+      mpcContractId: result.contractId,
     };
   }
 
@@ -261,6 +363,35 @@ export class LocalnetOrchestrator {
 
     // Check contract deployment
     console.log('   Checking contract deployment...');
+    const useMpcSetup = (this as any).useMpcSetup !== undefined 
+      ? (this as any).useMpcSetup 
+      : process.env.USE_MPC_SETUP !== 'false';
+
+    if (useMpcSetup) {
+      // For MPC Setup path, verify contract via direct RPC query
+      const { connect } = require('near-api-js');
+      const near = await connect({
+        networkId: 'localnet',
+        nodeUrl: this.config.rpcUrl,
+      });
+
+      for (let i = 0; i < maxAttempts; i++) {
+        try {
+          const account = await near.account(this.config.mpcContractId);
+          const state = await account.state();
+          if (state.code_hash && state.code_hash !== '11111111111111111111111111111111') {
+            console.log('   ✅ Contract verified');
+            break;
+          }
+        } catch (error: any) {
+          if (i === maxAttempts - 1) {
+            throw new Error(`Contract deployment verification timeout: ${error.message}`);
+          }
+        }
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+      }
+    } else {
+      // Legacy path uses ContractDeployer
     for (let i = 0; i < maxAttempts; i++) {
       const verified = await this.deployer.verifyContractDeployment(this.config.mpcContractId);
       if (verified) {
@@ -271,6 +402,7 @@ export class LocalnetOrchestrator {
         throw new Error('Contract deployment verification timeout');
       }
       await new Promise(resolve => setTimeout(resolve, pollInterval));
+      }
     }
 
     // Check MPC nodes

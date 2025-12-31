@@ -67,10 +67,10 @@ export function getNearRpcUrl(): string {
 
 /**
  * Get MPC contract ID from environment or default
- * Uses .node0 suffix for localnet accounts (v1.signer.node0)
+ * Uses .localnet suffix for localnet accounts (v1.signer.localnet)
  */
 export function getMpcContractId(): string {
-  return process.env.MPC_CONTRACT_ID || 'v1.signer.node0';
+  return process.env.MPC_CONTRACT_ID || 'v1.signer.localnet';
 }
 
 /**
@@ -98,16 +98,16 @@ export function getMpcNodes(): string[] {
  * Used for contract deployment operations
  */
 export function getDeployerAccountId(): string {
-  return process.env.DEPLOYER_ACCOUNT_ID || 'deployer.node0';
+  return process.env.DEPLOYER_ACCOUNT_ID || 'deployer.localnet';
 }
 
 /**
  * Get master account ID from environment or default
  * Master account used to create deployer account
- * For localnet, defaults to test.node0 (localnet accounts use .node0 suffix)
+ * For localnet, defaults to localnet (root account created in genesis)
  */
 export function getMasterAccountId(): string {
-  return process.env.MASTER_ACCOUNT_ID || 'test.node0';
+  return process.env.MASTER_ACCOUNT_ID || 'localnet';
 }
 
 /**
@@ -125,4 +125,36 @@ export function getMasterAccountKeyArn(): string | undefined {
  */
 export function getDeployerKmsKeyId(): string | undefined {
   return process.env.DEPLOYER_KMS_KEY_ID;
+}
+
+/**
+ * Get MPC CDK stack name from environment or default
+ * Default: MpcStandaloneStack
+ */
+export function getMpcStackName(): string {
+  return process.env.MPC_STACK_NAME || 'MpcStandaloneStack';
+}
+
+/**
+ * Get NEAR CDK stack name from environment or default
+ * Default: near-localnet-sync
+ */
+export function getNearStackName(): string {
+  return process.env.NEAR_STACK_NAME || 'near-localnet-sync';
+}
+
+/**
+ * Get AWS region from environment or default
+ * Default: us-east-1
+ */
+export function getAwsRegion(): string {
+  return process.env.AWS_REGION || 'us-east-1';
+}
+
+/**
+ * Get AWS profile from environment
+ * Returns undefined if not set
+ */
+export function getAwsProfile(): string | undefined {
+  return process.env.AWS_PROFILE;
 }

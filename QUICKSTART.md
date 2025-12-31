@@ -41,7 +41,8 @@ export DEPLOYER_KMS_KEY_ID=<DeployerKmsKeyId from stack output>
 # Set environment variables
 export DEPLOYER_KMS_KEY_ID=<from-step-1>
 export NEAR_RPC_URL=http://54.90.246.254:3030
-export MASTER_ACCOUNT_PRIVATE_KEY=<test.near-private-key>
+export MASTER_ACCOUNT_PRIVATE_KEY=<localnet-private-key>
+export MASTER_ACCOUNT_ID=localnet
 
 # Deploy contracts and start MPC
 npm run start:localnet
@@ -54,7 +55,7 @@ npm run start:localnet
 ✅ [DEPLOYER] RPC connection verified
 ...
 ✅ [ORCHESTRATOR] Infrastructure ready!
-   Contract: v1.signer.node0
+   Contract: v1.signer.localnet
    MPC Nodes: http://localhost:3000, http://localhost:3001, http://localhost:3002
 ```
 
@@ -74,8 +75,9 @@ aws ssm put-parameter \
 ## 🎉 Done!
 
 Your localnet now has:
-- ✅ `deployer.node0` account (KMS-encrypted key)
-- ✅ `v1.signer.node0` contract deployed
+- ✅ `localnet` root account (master account)
+- ✅ `signer.localnet` parent account
+- ✅ `v1.signer.localnet` contract deployed
 - ✅ 3 MPC nodes running (localhost:3000-3002)
 - ✅ Real chain signatures working
 
@@ -85,7 +87,7 @@ Your localnet now has:
 # 1. Check contract deployment
 curl -X POST http://54.90.246.254:3030 \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"query","params":{"request_type":"view_account","account_id":"v1.signer.node0","finality":"final"}}' \
+  -d '{"jsonrpc":"2.0","method":"query","params":{"request_type":"view_account","account_id":"v1.signer.localnet","finality":"final"}}' \
   | jq .
 
 # 2. Check MPC nodes

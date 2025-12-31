@@ -1,6 +1,27 @@
 # cross-chain-simulator
 
+> **Layer 3: Chain Signatures** - Cross-chain signing primitives with embedded MPC infrastructure
+
 NEAR Chain Signatures with **real MPC integration** for localnet development. Provides production-equivalent Chain Signatures infrastructure for testing and development.
+
+## Layer Architecture
+
+This is **Layer 3** of the 5-layer NEAR Localnet Simulator Stack:
+
+```
+Layer 1: NEAR Base                  → AWSNodeRunner
+Layer 2: NEAR Services              → near-localnet-services
+Layer 3: Chain Signatures (this)    ← You are here (includes MPC)
+Layer 4: Intents Protocol           → near-intents-simulator
+Layer 5: User Applications          → Your dApp
+```
+
+**Depends on**: Layer 2 (NEAR Services)
+**Provides to higher layers**: Chain Signatures API for address derivation and transaction signing
+
+### Embedded MPC Infrastructure
+
+This layer **includes** the MPC infrastructure (from github.com/near/mpc). MPC is not a separate layer - it's embedded within this package at `cross-chain-simulator/mpc-repo/`.
 
 > **✅ NEW**: Full CDK deployment with AWS KMS integration! See [QUICKSTART.md](./QUICKSTART.md) for 3-step deployment.
 
@@ -58,10 +79,13 @@ const sig = await chainSigs.requestSignature({
 
 This module orchestrates real blockchain infrastructure:
 
-- **NEAR Localnet**: Real blockchain node via AWS Node Runner
-- **MPC Network**: Real 3-8 node MPC network from github.com/near/mpc
+- **NEAR Localnet**: Real blockchain node via AWS Node Runner (Layer 1)
+- **NEAR Services**: Faucet and utilities (Layer 2)
+- **MPC Network**: Real 3-8 node MPC network from github.com/near/mpc (embedded in this layer)
 - **Chain Signatures**: Real v1.signer contract on localnet
 - **Threshold Signatures**: Real cryptographic signing via MPC
+
+**Important**: The MPC infrastructure is **embedded within this layer**, not a separate layer. The MPC CDK code resides at `cross-chain-simulator/mpc-repo/infra/aws-cdk/`.
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for complete architecture documentation.
 
@@ -154,12 +178,20 @@ npm run start:localnet
 After deploying the CDK stack:
 
 ```bash
-# Deploy contracts and start MPC nodes
+# Deploy contracts and start MPC nodes (uses production-equivalent MpcSetup by default)
 npm run start:localnet
 
 # Stop infrastructure (MPC nodes only, contracts persist)
 npm run stop:localnet
 ```
+
+**Configuration**: The orchestrator now defaults to using MpcSetup (production-equivalent path) which:
+- Initializes contract with `init()` method
+- Votes to add ECDSA domain (domain_id: 0)
+- Triggers distributed key generation
+- Mirrors mainnet/testnet initialization flow
+
+To use legacy path (not recommended): `export USE_MPC_SETUP=false`
 
 **MPC Nodes Only:**
 ```bash
@@ -210,7 +242,7 @@ const DEFAULT_NEAR_RPC_URL = 'http://10.0.5.132:3030';
 
 ### Contract Deployment
 
-The orchestrator handles deployment of the `v1.signer.node0` contract to your EC2 localnet:
+The orchestrator handles deployment of the `v1.signer.localnet` contract to your EC2 localnet:
 
 ```bash
 # Ensure contract WASM is available
@@ -224,7 +256,7 @@ npm run start:localnet
 **Contract Account Naming:**
 - **Mainnet**: `v1.signer`
 - **Testnet**: `v1.signer-prod.testnet`
-- **Localnet**: `v1.signer.node0`
+- **Localnet**: `v1.signer.localnet` (uses `localnet` root account)
 
 See [CONTRACT_DEPLOYMENT_STRATEGY.md](./CONTRACT_DEPLOYMENT_STRATEGY.md) for deployment details.
 See [IMPLEMENTATION_GUIDE.md](./IMPLEMENTATION_GUIDE.md) for detailed implementation steps.
