@@ -560,10 +560,19 @@ export class MpcSetup {
       console.log(`✅ [MPC-SETUP] Domains added, contract transitioning to key generation...`);
       console.log(`   Note: Key generation may take 5-10 minutes`);
     } catch (error: any) {
-      if (error?.message?.includes("already") || error?.message?.includes("Initializing")) {
+      const msg = error?.message || String(error);
+      // Idempotency: once domains are added, the contract may transition out of "Running"
+      // (e.g., key generation / protocol state machine). Re-voting can panic with:
+      // "Smart contract panicked: The protocol is not Running."
+      if (
+        msg.includes("already") ||
+        msg.includes("Initializing") ||
+        msg.includes("protocol is not Running") ||
+        msg.includes("The protocol is not Running")
+      ) {
         console.log(`✅ [MPC-SETUP] Domains already added or key generation in progress`);
       } else {
-        throw new Error(`Failed to add domains: ${error?.message || String(error)}`);
+        throw new Error(`Failed to add domains: ${msg}`);
       }
     }
   }
