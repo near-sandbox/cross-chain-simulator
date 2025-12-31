@@ -1,4 +1,7 @@
 #!/bin/bash
+
+# Enable production-equivalent MPC setup by default
+export USE_MPC_SETUP=${USE_MPC_SETUP:-true}
 # Connect to EC2 NEAR localnet RPC and deploy Chain Signatures infrastructure
 # Note: EC2 NEAR node deployed separately via /AWSNodeRunner/lib/near
 # This script manages contract deployment and MPC nodes only
@@ -17,9 +20,10 @@ echo "  - DEPLOYER_KMS_KEY_ID environment variable set"
 echo ""
 
 # Check for required environment variables
-if [ -z "$DEPLOYER_KMS_KEY_ID" ]; then
-    echo "❌ Error: DEPLOYER_KMS_KEY_ID environment variable is required"
-    echo "   Set it with: export DEPLOYER_KMS_KEY_ID=arn:aws:kms:region:account:key/key-id"
+if [ -z "$DEPLOYER_KMS_KEY_ID" ] && [ -z "$MASTER_ACCOUNT_PRIVATE_KEY" ]; then
+    echo "❌ Error: DEPLOYER_KMS_KEY_ID or MASTER_ACCOUNT_PRIVATE_KEY environment variable is required"
+    echo "   Set DEPLOYER_KMS_KEY_ID=arn:aws:kms:region:account:key/key-id"
+    echo "   OR set MASTER_ACCOUNT_PRIVATE_KEY=ed25519:..."
     exit 1
 fi
 
