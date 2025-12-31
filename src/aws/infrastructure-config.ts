@@ -87,6 +87,37 @@ export class InfrastructureConfigReader {
   }
 
   /**
+   * Derive the MPC "root" account for node account IDs (e.g. "localnet" for mpc-node-0.localnet).
+   *
+   * For our localnet stack, `MASTER_ACCOUNT_ID=localnet` and `MPC_CONTRACT_ID=v1.signer.localnet`,
+   * so we can reliably infer the root from either env var.
+   */
+  private getMpcRootAccountId(fallbackContractId?: string): string {
+    const master = (process.env.MASTER_ACCOUNT_ID || '').trim();
+    if (master) {
+      return master;
+    }
+
+    const envContractId = (process.env.MPC_CONTRACT_ID || '').trim();
+    const contractId = envContractId || (fallbackContractId || '').trim();
+    if (contractId) {
+      const parts = contractId.split('.');
+      const root = parts[parts.length - 1];
+      if (root) {
+        return root;
+      }
+    }
+
+    const networkId = (process.env.NEAR_NETWORK_ID || process.env.NEAR_NETWORK || '').trim();
+    if (networkId) {
+      return networkId;
+    }
+
+    // Default to localnet (Layer 3 dev workflow)
+    return 'localnet';
+  }
+
+  /**
    * Get infrastructure configuration from AWS
    */
   async getInfrastructureConfig(): Promise<InfrastructureConfig> {
@@ -198,7 +229,11 @@ export class InfrastructureConfigReader {
       const contractIdOutput = outputs.find(
         (o: any) => o.OutputKey === 'MpcContractId' || o.OutputKey === 'ContractId'
       );
-      const contractId = contractIdOutput?.OutputValue || 'v1.signer.node0';
+      const contractId =
+        (process.env.MPC_CONTRACT_ID || '').trim() ||
+        contractIdOutput?.OutputValue ||
+        'v1.signer.localnet';
+      const mpcRootAccountId = this.getMpcRootAccountId(contractId);
 
       // Extract node instance IDs and account IDs
       // Output keys may have CDK hash suffixes, so we use pattern matching
@@ -217,7 +252,7 @@ export class InfrastructureConfigReader {
         if (instanceIdOutput?.OutputValue) {
           nodeInfos.push({
             instanceId: instanceIdOutput.OutputValue,
-            accountId: accountIdOutput?.OutputValue || `mpc-node-${i}.node0`,
+            accountId: accountIdOutput?.OutputValue || `mpc-node-${i}.${mpcRootAccountId}`,
           });
         } else {
           break; // No more nodes
@@ -333,6 +368,7 @@ export class InfrastructureConfigReader {
    */
   async getMpcNodeKeys(nodeCount: number = 3): Promise<Map<string, string>> {
     const keys = new Map<string, string>();
+    const mpcRootAccountId = this.getMpcRootAccountId();
 
     for (let i = 0; i < nodeCount; i++) {
       try {
@@ -353,7 +389,7 @@ export class InfrastructureConfigReader {
             privateKey = response.SecretString;
           }
 
-          const accountId = `mpc-node-${i}.node0`;
+          const accountId = `mpc-node-${i}.${mpcRootAccountId}`;
           keys.set(accountId, privateKey);
         }
       } catch (error: any) {
@@ -374,6 +410,7 @@ export class InfrastructureConfigReader {
    */
   async getMpcNodeP2pPrivateKeys(nodeCount: number = 3): Promise<Map<string, string>> {
     const keys = new Map<string, string>();
+    const mpcRootAccountId = this.getMpcRootAccountId();
 
     for (let i = 0; i < nodeCount; i++) {
       try {
@@ -394,7 +431,7 @@ export class InfrastructureConfigReader {
             privateKey = response.SecretString;
           }
 
-          const accountId = `mpc-node-${i}.node0`;
+          const accountId = `mpc-node-${i}.${mpcRootAccountId}`;
           keys.set(accountId, privateKey);
         }
       } catch (error: any) {
