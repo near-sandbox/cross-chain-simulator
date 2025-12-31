@@ -70,7 +70,7 @@
     "@aws-cdk/custom-resources:logApiResponseDataPropertyTrueFalse": true,
     "@aws-cdk/aws-s3:keepNotificationInImportedBucket": false,
     "nearRpcUrl": "http://54.90.246.254:3030",
-    "masterAccountId": "test.near"
+    "masterAccountId": "test.node0"
   }
 }
 

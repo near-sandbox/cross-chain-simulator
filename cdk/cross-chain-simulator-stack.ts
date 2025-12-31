@@ -76,24 +76,7 @@ export class CrossChainSimulatorStack extends cdk.Stack {
       exportName: `${this.stackName}-DeployerKmsKeyArn`,
     });
 
-    // 2. Create SSM parameter for master account key (optional, for production)
-    // Note: This is a placeholder - do NOT store private keys in CloudFormation props
-    // In production, create this parameter manually or via secure pipeline
-    if (props.masterAccountPrivateKey) {
-      const masterKeyParam = new ssm.StringParameter(this, 'MasterAccountKey', {
-        parameterName: `/${this.stackName}/master-account-key`,
-        stringValue: props.masterAccountPrivateKey,
-        description: 'NEAR master account private key (localnet only)',
-        tier: ssm.ParameterTier.STANDARD,
-      });
-
-      new cdk.CfnOutput(this, 'MasterAccountKeyParameter', {
-        value: masterKeyParam.parameterName,
-        description: 'SSM parameter name for master account key',
-      });
-    }
-
-    // 3. Create IAM role for EC2 instances
+    // 2. Create IAM role for EC2 instances
     // Use this role for EC2 instances that run the orchestrator
     this.ec2Role = new iam.Role(this, 'EC2OrchestratorRole', {
       assumedBy: new iam.ServicePrincipal('ec2.amazonaws.com'),
@@ -154,7 +137,7 @@ export class CrossChainSimulatorStack extends cdk.Stack {
       exportName: `${this.stackName}-EC2InstanceProfileName`,
     });
 
-    // 4. Export configuration for scripts
+    // 3. Export configuration for scripts
     new cdk.CfnOutput(this, 'NearRpcUrl', {
       value: props.nearRpcUrl,
       description: 'NEAR RPC URL for localnet',
