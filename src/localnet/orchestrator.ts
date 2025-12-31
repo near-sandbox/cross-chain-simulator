@@ -230,7 +230,12 @@ export class LocalnetOrchestrator {
     const result = await mpcSetup.setupMpcNetwork();
 
     // 4. Update config with actual values from infrastructure
-    this.config.rpcUrl = infraConfig.near.rpcUrl;
+    // IMPORTANT: Preserve an explicit local override (e.g., SSM port-forward to localhost)
+    // so subsequent health checks keep using the reachable RPC URL from this process.
+    const rpcOverride = (process.env.NEAR_RPC_URL || '').trim();
+    if (!rpcOverride) {
+      this.config.rpcUrl = infraConfig.near.rpcUrl;
+    }
     this.config.mpcContractId = result.contractId;
     this.config.mpcNodes = result.participants.map((p) => p.url);
 
