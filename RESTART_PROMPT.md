@@ -35,7 +35,7 @@ We've been working on the **cross-chain-simulator** project, implementing contra
 
 **Files to Reference**:
 - `MODE1_TESTING_CHECKLIST.md` - Complete testing checklist
-- `DEPLOYMENT_MODES.md` - Mode 1 deployment guide
+- `docs/archive/2025-12-node0-era/DEPLOYMENT_MODES.md` - Legacy “mode 1/mode 2” deployment guide (historical)
 - `KEY_MANAGEMENT_IMPLEMENTATION.md` - Implementation details
 
 ## Key Files Changed
@@ -44,7 +44,7 @@ We've been working on the **cross-chain-simulator** project, implementing contra
 - `cdk/cross-chain-simulator-stack.ts` - IAM permissions for Secrets Manager
 - `cdk/bin/app.ts` - Mode detection (Mode 1 vs Mode 2)
 - `src/config.ts` - Added `getMasterAccountKeyArn()`
-- `DEPLOYMENT_MODES.md` - Complete deployment guide
+- `docs/archive/2025-12-node0-era/DEPLOYMENT_MODES.md` - Legacy deployment guide (historical)
 - `KEY_MANAGEMENT_STRATEGY.md` - Key management patterns
 - `KEY_MANAGEMENT_IMPLEMENTATION.md` - Implementation status
 
@@ -86,7 +86,7 @@ Please:
 
 Reference files:
 - MODE1_TESTING_CHECKLIST.md
-- DEPLOYMENT_MODES.md
+- docs/archive/2025-12-node0-era/DEPLOYMENT_MODES.md
 - cdk/cross-chain-simulator-stack.ts
 ```
 

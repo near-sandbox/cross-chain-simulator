@@ -43,7 +43,11 @@ near view-state v1.signer-prod.testnet --finality final --utf8 false
 
 - **Mainnet**: `v1.signer`
 - **Testnet**: `v1.signer-prod.testnet`
-- **Localnet**: `v1.signer.node0`
+- **Localnet**: `v1.signer.localnet`
+
+Notes:
+- In localnet we create a real `localnet` root account in genesis (Layer 1), then use `signer.localnet` as the parent for `v1.signer.localnet`.
+- Broadcasting the signed transaction to the destination chain is **client/app responsibility** (Layer 5), not part of the signer contract itself. See: https://docs.near.org/chain-abstraction/chain-signatures/getting-started
 
 ## References
 

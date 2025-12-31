@@ -37,8 +37,8 @@ The `cross-chain-simulator` provides **real NEAR Chain Signatures (MPC)** infras
    - Real signature generation via MPC network
 
 2. **v1.signer Contract Integration** ✅
-   - `NearClient` calls real contract `public_key` method for address derivation
-   - `NearClient` calls real contract `sign` method for signature requests
+   - Contract provides `sign(...)` to request threshold signatures (domain_id=0 is Secp256k1/EVM)
+   - Contract provides `derived_public_key(...)` for per-caller derivation by (predecessor, path, domain)
    - Real MPC-derived public keys
    - Real on-chain state management
 
@@ -132,10 +132,17 @@ cross-chain-simulator
 
 **Contract Interface**:
 ```rust
-// v1.signer contract methods
-pub fn public_key(&self, path: String) -> PublicKey;
-pub fn sign(&mut self, request: SignRequest) -> Promise;
+// v1.signer contract methods (conceptual)
+pub fn public_key(&self, domain_id: Option<u32>) -> PublicKey; // root key by domain
+pub fn derived_public_key(&self, path: String, predecessor: Option<AccountId>, domain_id: Option<u32>) -> PublicKey;
+pub fn sign(&mut self, request: SignRequestArgs) -> Promise; // yields until signature ready
 ```
+
+**Important layer boundary**:
+
+- Chain Signatures returns a signature (or a signed tx payload) that can be sent to the target chain.
+- **Broadcasting** to the destination chain (e.g. `eth_sendRawTransaction`) is done by the **client/app** (Layer 5), not by the MPC network or this layer.
+  - Source: https://docs.near.org/chain-abstraction/chain-signatures/getting-started
 
 **MPC Node Architecture** (from github.com/near/mpc):
 - NEAR Indexer: Tracks `v1.signer` contract for signature requests

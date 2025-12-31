@@ -11,6 +11,13 @@ This CDK stack deploys the infrastructure for NEAR Chain Signatures with real MP
 
 **Note**: MPC nodes and contract deployment are managed via scripts (not Lambda) since orchestration requires Docker support.
 
+## Status (important)
+
+This `cdk/` directory is **legacy** from earlier iterations.
+
+For the current 5-layer localnet stack, the canonical MPC infrastructure CDK app lives under:
+- `cross-chain-simulator/mpc-repo/infra/aws-cdk` (deploys `MpcStandaloneStack` into the NEAR VPC)
+
 ## Prerequisites
 
 - AWS CDK v2 installed: `npm install -g aws-cdk`
@@ -126,8 +133,8 @@ npm run start:localnet
 │ Infrastructure Components                       │
 ├─────────────────────────────────────────────────┤
 │ 1. Connect to EC2 NEAR RPC                      │
-│ 2. Deploy deployer.node0 (KMS-encrypted key) │
-│ 3. Deploy v1.signer.node0 contract           │
+│ 2. Deploy deployer.localnet (legacy path)       │
+│ 3. Deploy v1.signer.localnet contract           │
 │ 4. Start MPC nodes (Docker)                     │
 │ 5. Health checks                                │
 └─────────────────────────────────────────────────┘

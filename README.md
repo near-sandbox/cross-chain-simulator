@@ -75,6 +75,12 @@ const sig = await chainSigs.requestSignature({
 - Fee estimation
 - Production-equivalent localnet environment
 
+## Layer boundary (important): Broadcasting is Layer 5
+
+Chain Signatures (Layer 3) produces signatures (and/or signed transaction payloads). **Broadcasting** the signed transaction to the destination chain (e.g. Ethereum JSON-RPC) is the responsibility of the **client/app** (Layer 5).
+
+Reference: NEAR docs “Relaying the Signature” step: `https://docs.near.org/chain-abstraction/chain-signatures/getting-started`
+
 ## Architecture
 
 This module orchestrates real blockchain infrastructure:
@@ -136,42 +142,10 @@ const config: LocalnetConfig = {
 const client = createChainSignaturesClient(config);
 ```
 
-### Deployment Modes
+### Deployment
 
-The simulator supports two deployment modes. See [DEPLOYMENT_MODES.md](./DEPLOYMENT_MODES.md) for details.
-
-**Mode 1: Existing Infrastructure** (Use existing NEAR node)
-```bash
-# Prerequisites:
-# - Existing NEAR localnet node running
-# - Master account key in AWS Secrets Manager
-# - AWS credentials configured
-
-export NEAR_RPC_URL=http://your-existing-node:3030
-export MASTER_ACCOUNT_KEY_ARN=arn:aws:secretsmanager:region:account:secret:key
-export DEPLOYER_KMS_KEY_ID=arn:aws:kms:region:account:key/key-id
-
-# Deploy simulator stack
-cdk deploy CrossChainSimulatorStack
-
-# Deploy contracts and start MPC
-npm run start:localnet
-```
-
-**Mode 2: Integrated Deployment** (Deploy NEAR node + simulator)
-```bash
-# Prerequisites:
-# - AWS Node Runner code available
-# - AWS credentials configured
-
-export DEPLOYER_KMS_KEY_ID=arn:aws:kms:region:account:key/key-id
-
-# Deploy both NEAR node and simulator
-cdk deploy CrossChainSimulatorStack --all
-
-# Deploy contracts and start MPC
-npm run start:localnet
-```
+- **Canonical guide**: See [DEPLOYMENT.md](./DEPLOYMENT.md)
+- **Historical notes** (older “mode 1/mode 2” iterations, node0-era naming, etc.) are kept under `docs/archive/`.
 
 ### Starting Infrastructure
 
@@ -258,8 +232,7 @@ npm run start:localnet
 - **Testnet**: `v1.signer-prod.testnet`
 - **Localnet**: `v1.signer.localnet` (uses `localnet` root account)
 
-See [CONTRACT_DEPLOYMENT_STRATEGY.md](./CONTRACT_DEPLOYMENT_STRATEGY.md) for deployment details.
-See [IMPLEMENTATION_GUIDE.md](./IMPLEMENTATION_GUIDE.md) for detailed implementation steps.
+For historical context (older naming/deployer patterns), see `docs/archive/`.
 
 ## Deployment
 
@@ -301,10 +274,9 @@ npm run cdk:destroy  # Remove infrastructure (KMS key retained)
 ## Documentation
 
 - [ARCHITECTURE.md](./ARCHITECTURE.md) - Complete architecture overview
-- [IMPLEMENTATION_GUIDE.md](./IMPLEMENTATION_GUIDE.md) - Step-by-step implementation plan
 - [DEPLOYMENT.md](./DEPLOYMENT.md) - Deployment guide for CDK and scripts
-- [CONTRACT_DEPLOYMENT_STRATEGY.md](./CONTRACT_DEPLOYMENT_STRATEGY.md) - Contract deployment strategy
-- [cdk/README.md](./cdk/README.md) - CDK infrastructure details
+- [contracts/README.md](./contracts/README.md) - Contract WASM + naming
+- `docs/archive/` - Historical docs from earlier iterations (kept for reference)
 
 ## References
 

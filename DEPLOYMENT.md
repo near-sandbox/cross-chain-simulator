@@ -2,88 +2,52 @@
 
 ## Overview
 
-This guide covers deploying the cross-chain-simulator infrastructure with real MPC integration to NEAR localnet.
+This guide covers deploying the cross-chain-simulator **Layer 3 (Chain Signatures)** infrastructure with real MPC integration to NEAR localnet.
+
+Scope note:
+- Layer 3 provides **signatures** (via `v1.signer.*` + MPC).
+- Broadcasting signed transactions to destination chains is **Layer 5 app responsibility** (see NEAR docs “Relaying the Signature”): https://docs.near.org/chain-abstraction/chain-signatures/getting-started
 
 ## Architecture Components
 
-1. **EC2 NEAR Node** - Deployed separately via `/AWSNodeRunner/lib/near`
-2. **KMS Key** - For deployer account encryption (deployed via CDK)
-3. **Contract Deployer** - Deploys `deployer.node0` and `v1.signer.node0`
-4. **MPC Nodes** - 3-node Docker network for threshold signatures
-5. **Orchestrator** - Coordinates all components
+1. **Layer 1: NEAR Base** - NEAR localnet node on EC2 (deployed via `AWSNodeRunner`)
+2. **Layer 2: NEAR Services** - faucet + core contracts (deployed via `near-localnet-services`)
+3. **Layer 3: MPC Nodes** - MPC EC2 instances (deployed via embedded `mpc-repo/infra/aws-cdk` `MpcStandaloneStack`)
+4. **Layer 3: v1.signer Contract** - deployed on NEAR localnet as `v1.signer.localnet`
+5. **Layer 3 Scripts/Orchestration** - `scripts/start-localnet.sh` (uses `MASTER_ACCOUNT_PRIVATE_KEY` or KMS)
 
 ## Deployment Options
 
-### Option 1: CDK + Scripts (Recommended for Production)
+### Option 1: Deploy via the 5-layer orchestrator (recommended for this workspace)
 
-**Step 1: Deploy CDK infrastructure**
+If you’re using the full 5-layer stack, deploy Layer 3 via `near-localnet-orchestrator`:
 
-```bash
-# Deploy KMS key, IAM roles, and SSM parameters
-cd /Users/Shai.Perednik/Documents/code_workspace/near_mobile/cross-chain-simulator
+This ensures:
+- MPC nodes are deployed into the same VPC as NEAR Base
+- MPC nodes use the authoritative NEAR genesis + boot nodes
+- Contract is deployed as `v1.signer.localnet`
 
-# Set NEAR RPC URL
-export NEAR_RPC_URL=http://54.90.246.254:3030
+### Option 2: Standalone Layer 3 deployment (manual)
 
-# Deploy stack
-npm run cdk:deploy
+This is useful if you want to manage Layers 1–2 yourself but still deploy MPC + `v1.signer.localnet`.
 
-# Get KMS key ID
-export DEPLOYER_KMS_KEY_ID=$(aws cloudformation describe-stacks \
-  --stack-name CrossChainSimulatorStack \
-  --query 'Stacks[0].Outputs[?OutputKey==`DeployerKmsKeyId`].OutputValue' \
-  --output text)
+High-level steps:
 
-echo "KMS Key ID: $DEPLOYER_KMS_KEY_ID"
-```
+1) Deploy NEAR Base (Layer 1) and ensure `localnet` root key exists in SSM:
+- `/near-localnet/localnet-account-id`
+- `/near-localnet/localnet-account-key`
 
-**Step 2: Obtain contract WASM**
+2) Deploy MPC EC2 instances (`MpcStandaloneStack`) from:
+- `cross-chain-simulator/mpc-repo/infra/aws-cdk`
 
-```bash
-# Download or build v1.signer contract
-./contracts/download-wasm.sh
+3) Populate Secrets Manager keys for MPC nodes (if placeholders exist):
+- `scripts/generate-test-keys.sh`
+- `scripts/update-secrets.sh`
 
-# Verify WASM exists
-ls -lh contracts/v1.signer.wasm
-```
-
-**Step 3: Get master account key**
-
-For localnet (`test.near`):
-
-```bash
-# Option A: If you have the key
-export MASTER_ACCOUNT_PRIVATE_KEY="ed25519:..."
-
-# Option B: Get from SSM (if stored there)
-export MASTER_ACCOUNT_PRIVATE_KEY=$(aws ssm get-parameter \
-  --name /CrossChainSimulatorStack/master-account-key \
-  --with-decryption \
-  --query 'Parameter.Value' \
-  --output text)
-```
-
-**Step 4: Run orchestrator**
-
-```bash
-# Run deployment
-npm run start:localnet
-
-# Or use programmatically
-node -e "
-const { LocalnetOrchestrator } = require('./dist/localnet/orchestrator');
-
-(async () => {
-  const orch = new LocalnetOrchestrator({
-    masterAccountPrivateKey: process.env.MASTER_ACCOUNT_PRIVATE_KEY,
-    encryptedDeployerPrivateKey: process.env.DEPLOYER_ENCRYPTED_KEY, // If reusing
-  });
-  
-  const config = await orch.start();
-  console.log('Deployed:', config);
-})();
-"
-```
+4) Deploy/initialize the signer contract + accounts:
+- `MASTER_ACCOUNT_ID=localnet`
+- `MPC_CONTRACT_ID=v1.signer.localnet`
+- `scripts/start-localnet.sh`
 
 ### Option 2: Scripts Only (Development)
 
@@ -150,24 +114,13 @@ Expected output:
 ```
 🚀 [ORCHESTRATOR] Connecting to NEAR localnet and deploying infrastructure...
    RPC URL: http://54.90.246.254:3030
-   Contract: v1.signer.node0
+   Contract: v1.signer.localnet
 
 📡 [ORCHESTRATOR] Verifying RPC connection...
 ✅ [DEPLOYER] RPC connection verified
 
-🔑 [ORCHESTRATOR] Adding master account key...
-✅ [DEPLOYER] Master account key added to keystore
-
-👤 [ORCHESTRATOR] Initializing master account...
-✅ [DEPLOYER] Master account initialized
-
-🔑 [ORCHESTRATOR] Creating deployer account...
-✅ [DEPLOYER] Deployer account created: deployer.node0
-💾 [DEPLOYER] Encrypted private key stored (save this for future use):
-   DEPLOYER_ENCRYPTED_KEY=AQICAHi...
-
 📦 [ORCHESTRATOR] Deploying v1.signer contract...
-✅ [DEPLOYER] Contract deployed: v1.signer.node0
+✅ [DEPLOYER] Contract deployed: v1.signer.localnet
 
 🔗 [ORCHESTRATOR] Starting MPC nodes...
 ✅ [ORCHESTRATOR] MPC nodes started
@@ -257,11 +210,11 @@ npm run start:localnet
 |----------|----------|---------|-------------|
 | `DEPLOYER_KMS_KEY_ID` | ✅ Yes | - | AWS KMS key ID for encryption |
 | `NEAR_RPC_URL` | No | `http://localhost:3030` | NEAR RPC endpoint |
-| `MASTER_ACCOUNT_ID` | No | `test.near` | Master account name |
+| `MASTER_ACCOUNT_ID` | No | `localnet` | Master account name (localnet root) |
 | `MASTER_ACCOUNT_PRIVATE_KEY` | For first deployment | - | Master account private key |
-| `DEPLOYER_ACCOUNT_ID` | No | `deployer.node0` | Deployer account name |
+| `DEPLOYER_ACCOUNT_ID` | Optional | `deployer.localnet` | Deployer account name (legacy path only) |
 | `DEPLOYER_ENCRYPTED_KEY` | For reuse | - | Pre-encrypted deployer key |
-| `MPC_CONTRACT_ID` | No | `v1.signer.node0` | MPC contract name |
+| `MPC_CONTRACT_ID` | No | `v1.signer.localnet` | MPC contract name |
 | `AWS_REGION` | No | `us-east-1` | AWS region for KMS |
 
 ## Security Best Practices
@@ -301,6 +254,6 @@ For production, consider:
 ## References
 
 - [CDK README](./cdk/README.md) - CDK infrastructure details
-- [CONTRACT_DEPLOYMENT_STRATEGY.md](./CONTRACT_DEPLOYMENT_STRATEGY.md) - Deployment strategy
+- Historical docs (older naming/deployer patterns): `docs/archive/`
 - [/chain-mobil/docs/kms-near-integration.md](../chain-mobil/docs/kms-near-integration.md) - KMS integration pattern
 

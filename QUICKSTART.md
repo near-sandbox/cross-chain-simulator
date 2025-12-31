@@ -135,7 +135,7 @@ npm run stop:localnet
 
 - **Deployment issues**: See [DEPLOYMENT.md](./DEPLOYMENT.md)
 - **CDK issues**: See [cdk/README.md](./cdk/README.md)
-- **Contract issues**: See [CONTRACT_DEPLOYMENT_STRATEGY.md](./CONTRACT_DEPLOYMENT_STRATEGY.md)
+- **Historical contract/deployer docs**: See `docs/archive/` (older iterations)
 - **KMS pattern**: See `/chain-mobil/docs/kms-near-integration.md`
 
 ## What's Next?
