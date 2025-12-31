@@ -36,8 +36,10 @@ fi
 # Run orchestrator via Node.js
 cd "$PROJECT_ROOT"
 
-# Check if TypeScript is compiled
-if [ ! -d "dist/localnet" ]; then
+# Always build before running. `dist/` is not committed in this repo, and stale builds
+# can cause confusing `.node0` vs `.localnet` mismatches.
+# Set SKIP_BUILD=true to bypass in development.
+if [ "${SKIP_BUILD:-false}" != "true" ]; then
     echo "📦 Building TypeScript..."
     npm run build
 fi
