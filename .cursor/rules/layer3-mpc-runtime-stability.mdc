@@ -1,0 +1,33 @@
+## Layer 3 Guardrails: MPC Runtime Stability Only (NO architecture changes)
+
+### Objective (single goal)
+Fix Layer 3 so **MPC node EC2 instances are healthy**:
+- `mpc-node` container stays running (no restart loop)
+- Port **8080** is listening
+- `/health` returns HTTP 200 from within the VPC
+
+### Scope (allowed work)
+Only work that directly makes MPC nodes healthy:
+- MPC node **UserData/bootstrap** in `cross-chain-simulator/mpc-repo/infra/aws-cdk`
+- MPC node **IAM permissions** required for runtime (e.g. Cloud Map registration)
+- MPC node **runtime config inputs** (secrets retrieval, boot nodes, genesis download)
+
+### Explicit non-goals (forbidden unless user explicitly approves)
+Do NOT:
+- Rename accounts/contracts or change `.localnet` naming
+- Refactor unrelated code paths or re-architect Layer 3
+- Add new AWS services or new stacks
+- Destroy Layer 1/2 stacks
+
+### Required evidence before proposing code changes
+Before any code change, capture (per MPC node instance):
+1) `docker ps -a`
+2) `docker logs --tail 200 mpc-node`
+3) `ss -ltnp | grep -E ':8080|:3030'`
+4) `tail -200 /var/log/cloud-init-output.log`
+
+### Definition of Done (must pass)
+- All MPC nodes: container `Up` for 5+ minutes
+- All MPC nodes: `curl -sf http://127.0.0.1:8080/health` returns 200 (SSM into node)
+- From NEAR base EC2: `curl -sf http://<mpc-private-ip>:8080/health` returns 200 for each node
+
