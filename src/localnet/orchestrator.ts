@@ -368,18 +368,27 @@ export class LocalnetOrchestrator {
       : process.env.USE_MPC_SETUP !== 'false';
 
     if (useMpcSetup) {
-      // For MPC Setup path, verify contract via direct RPC query
-      const { connect } = require('near-api-js');
-      const near = await connect({
-        networkId: 'localnet',
-        nodeUrl: this.config.rpcUrl,
-      });
-
+      // For MPC Setup path, verify contract via raw JSON-RPC (no keystore/signing required).
       for (let i = 0; i < maxAttempts; i++) {
         try {
-          const account = await near.account(this.config.mpcContractId);
-          const state = await account.state();
-          if (state.code_hash && state.code_hash !== '11111111111111111111111111111111') {
+          const response = await fetch(this.config.rpcUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              jsonrpc: '2.0',
+              id: 'mpc-healthcheck',
+              method: 'query',
+              params: {
+                request_type: 'view_account',
+                finality: 'final',
+                account_id: this.config.mpcContractId,
+              },
+            }),
+          });
+
+          const json: any = await response.json();
+          const codeHash = json?.result?.code_hash;
+          if (codeHash && codeHash !== '11111111111111111111111111111111') {
             console.log('   ✅ Contract verified');
             break;
           }
