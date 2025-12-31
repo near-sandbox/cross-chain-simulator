@@ -172,22 +172,39 @@ export class MpcSetup {
     }
 
     const signerAccountId = this.getSignerAccountIdFromContractId(contractId);
+    const masterKeyPair = KeyPair.fromString(this.options.masterAccountPrivateKey as any);
+    const masterPublicKey = masterKeyPair.getPublicKey().toString();
 
     // 1. Create signer.localnet from localnet
     const signerExists = await this.accountExists(signerAccountId);
     if (!signerExists) {
       console.log(`📝 [MPC-SETUP] Creating ${signerAccountId}...`);
-      const signerKeyPair = KeyPair.fromRandom("ed25519");
-      const signerPublicKey = signerKeyPair.getPublicKey();
       await this.masterAccount.createAccount(
         signerAccountId,
-        signerPublicKey,
+        masterKeyPair.getPublicKey(),
         utils.format.parseNearAmount("100")! // enough for contract creation + fees
       );
-      await this.keyStore.setKey(this.networkId, signerAccountId, signerKeyPair);
+      // IMPORTANT: Use the master key for signer.localnet so we never lose access on retries.
+      await this.keyStore.setKey(this.networkId, signerAccountId, masterKeyPair);
       console.log(`✅ [MPC-SETUP] Created ${signerAccountId}`);
     } else {
       console.log(`✅ [MPC-SETUP] ${signerAccountId} already exists`);
+      // Ensure we can sign as signer.localnet. If the account was created previously with a random key,
+      // we cannot recover without resetting localnet state.
+      const accessKeyList: any = await this.near.connection.provider.query({
+        request_type: "view_access_key_list",
+        finality: "final",
+        account_id: signerAccountId,
+      } as any);
+      const chainKeys = (accessKeyList?.keys || []).map((k: any) => k.public_key);
+      if (!chainKeys.includes(masterPublicKey)) {
+        throw new Error(
+          `Signer account '${signerAccountId}' exists but is not controlled by the localnet master key.\n` +
+            `This usually happens if a previous run created the account with a random key and then crashed.\n` +
+            `Fix: reset localnet state (wipe node data) and rerun Layer 3 deploy.`
+        );
+      }
+      await this.keyStore.setKey(this.networkId, signerAccountId, masterKeyPair);
     }
 
     this.signerAccount = await this.near.account(signerAccountId);
@@ -197,23 +214,30 @@ export class MpcSetup {
     const contractExists = await this.accountExists(contractAccountId);
     if (!contractExists) {
       console.log(`📝 [MPC-SETUP] Creating ${contractAccountId}...`);
-      const contractKeyPair = KeyPair.fromRandom("ed25519");
-      const contractPublicKey = contractKeyPair.getPublicKey();
       await this.signerAccount.createAccount(
         contractAccountId,
-        contractPublicKey,
+        masterKeyPair.getPublicKey(),
         utils.format.parseNearAmount("50")! // contract deployment balance
       );
-      await this.keyStore.setKey(this.networkId, contractAccountId, contractKeyPair);
+      // IMPORTANT: Use the master key for the contract account so deploy/init is always repeatable.
+      await this.keyStore.setKey(this.networkId, contractAccountId, masterKeyPair);
       console.log(`✅ [MPC-SETUP] Created ${contractAccountId}`);
     } else {
       console.log(`✅ [MPC-SETUP] ${contractAccountId} already exists`);
-      const existingKey = await this.keyStore.getKey(this.networkId, contractAccountId);
-      if (!existingKey) {
-        console.warn(
-          `⚠️  [MPC-SETUP] ${contractAccountId} exists but key not in keystore. Contract deployment may fail.`
+      // Ensure we can sign as the contract account. If not, we cannot deploy the WASM.
+      const accessKeyList: any = await this.near.connection.provider.query({
+        request_type: "view_access_key_list",
+        finality: "final",
+        account_id: contractAccountId,
+      } as any);
+      const chainKeys = (accessKeyList?.keys || []).map((k: any) => k.public_key);
+      if (!chainKeys.includes(masterPublicKey)) {
+        throw new Error(
+          `Contract account '${contractAccountId}' exists but is not controlled by the localnet master key.\n` +
+            `Fix: reset localnet state and rerun Layer 3 deploy.`
         );
       }
+      await this.keyStore.setKey(this.networkId, contractAccountId, masterKeyPair);
     }
 
     this.contractAccount = await this.near.account(contractAccountId);
