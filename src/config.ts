@@ -17,6 +17,18 @@ export interface LocalnetConfig {
   mpcContractId: string;
   mpcNodes: string[];
   headers?: Record<string, string>;
+  
+  /**
+   * Account ID that will sign transactions (e.g., call v1.signer.sign)
+   * Required for signing operations
+   */
+  signerAccountId?: string;
+  
+  /**
+   * Private key for the signer account (ed25519:... format)
+   * Required for signing operations
+   */
+  signerPrivateKey?: string;
 }
 
 export function getConfig(): ChainSignaturesConfig {

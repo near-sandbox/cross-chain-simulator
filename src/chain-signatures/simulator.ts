@@ -19,6 +19,7 @@ import { LocalnetConfig } from '../config';
 import { NearClient } from './near-client';
 import { MPCService } from './mpc-service';
 import { createHash } from 'crypto';
+import { keccak256, getAddress, computeAddress } from 'ethers';
 
 export class ChainSignaturesSimulator implements IChainSignatures, ICrossChainExec {
   private mpc: MPCService;
@@ -86,72 +87,150 @@ export class ChainSignaturesSimulator implements IChainSignatures, ICrossChainEx
 
   /**
    * Build default derivation path
+   * 
+   * Per NEAR docs, the path is a user-defined string like "ethereum-1", "bitcoin-main".
+   * The contract uses: root_key + path + predecessor to derive the address.
+   * 
+   * @see https://docs.near.org/chain-abstraction/chain-signatures/getting-started
    */
   private buildDefaultPath(nearAccount: string, chain: SupportedChain): string {
-    const chainId = this.getChainId(chain);
-    return `${nearAccount},${chainId}`;
-  }
-
-  /**
-   * Get chain ID for derivation path
-   */
-  private getChainId(chain: SupportedChain): number {
-    const chainIds: Record<SupportedChain, number> = {
-      bitcoin: 0,
-      ethereum: 1,
-      dogecoin: 3,
-      ripple: 144,
-      polygon: 137,
-      arbitrum: 42161,
-      optimism: 10,
-    };
-    return chainIds[chain] || 0;
+    // NEAR docs example format: "ethereum-1", "bitcoin-main"
+    // We use a deterministic format based on account + chain for uniqueness
+    return `${chain}-${nearAccount}`;
   }
 
   /**
    * Convert MPC public key to chain-specific address
+   * 
+   * For EVM chains: Uses Keccak-256 of the uncompressed public key (64 bytes),
+   * then takes the last 20 bytes as the address. This matches ethers.computeAddress().
    */
   private publicKeyToAddress(publicKey: string, chain: SupportedChain): string {
-    // Remove prefix if present (e.g., "02" or "03" for compressed ECDSA)
-    const cleanKey = publicKey.startsWith('02') || publicKey.startsWith('03')
-      ? publicKey.substring(2)
-      : publicKey;
-
-    // Hash the public key
-    const hash = createHash('sha256')
-      .update(Buffer.from(cleanKey, 'hex'))
-      .digest('hex');
-
     switch (chain) {
-      case 'bitcoin':
-      case 'dogecoin':
-        return this.toBech32Address(hash, chain);
       case 'ethereum':
       case 'polygon':
       case 'arbitrum':
       case 'optimism':
-        return this.toEthereumAddress(hash);
+        return this.toEvmAddress(publicKey);
+      case 'bitcoin':
+      case 'dogecoin':
+        return this.toBech32Address(publicKey, chain);
       case 'ripple':
-        return this.toRippleAddress(hash);
+        return this.toRippleAddress(publicKey);
       default:
         throw new Error(`Unsupported chain: ${chain}`);
     }
   }
 
-  private toBech32Address(hash: string, chain: SupportedChain): string {
-    const prefix = chain === 'bitcoin' ? 'bc1' : 'dgb1';
-    const addr = hash.substring(0, 40);
+  /**
+   * Convert MPC public key to EVM address (Ethereum, Polygon, Arbitrum, Optimism)
+   * 
+   * EVM standard:
+   * 1. Take uncompressed public key (65 bytes with 04 prefix, or 64 bytes raw x,y)
+   * 2. Keccak-256 hash of the 64-byte x,y coordinates
+   * 3. Take the last 20 bytes (40 hex chars) as the address
+   * 4. Apply EIP-55 checksum casing
+   */
+  private toEvmAddress(publicKey: string): string {
+    // Remove 'secp256k1:' or 'ed25519:' prefix if present (NEAR key format)
+    let cleanKey = publicKey;
+    if (publicKey.includes(':')) {
+      cleanKey = publicKey.split(':')[1];
+    }
+
+    // Check if hex or base58
+    const isHex = /^[0-9a-fA-F]+$/.test(cleanKey);
+    
+    let keyBytes: Uint8Array;
+    if (isHex) {
+      keyBytes = Buffer.from(cleanKey, 'hex');
+    } else {
+      // Base58 encoded - decode it
+      keyBytes = this.decodeBase58(cleanKey);
+    }
+
+    // Handle different key formats:
+    // - 65 bytes: 04 prefix + 64 bytes (x,y) - use 64 bytes
+    // - 64 bytes: raw x,y coordinates - use as-is
+    // - 33 bytes: compressed (02/03 prefix + 32 bytes x) - need to decompress
+    let uncompressedXY: Uint8Array;
+    
+    if (keyBytes.length === 65 && keyBytes[0] === 0x04) {
+      // Uncompressed with prefix: skip the 04 prefix
+      uncompressedXY = keyBytes.slice(1);
+    } else if (keyBytes.length === 64) {
+      // Already raw x,y
+      uncompressedXY = keyBytes;
+    } else if (keyBytes.length === 33 && (keyBytes[0] === 0x02 || keyBytes[0] === 0x03)) {
+      // Compressed key - use ethers computeAddress which handles this
+      const hexKey = '0x' + Buffer.from(keyBytes).toString('hex');
+      return computeAddress(hexKey);
+    } else {
+      // Fallback: try to use ethers directly with whatever we have
+      const hexKey = '0x' + Buffer.from(keyBytes).toString('hex');
+      try {
+        return computeAddress(hexKey);
+      } catch {
+        throw new Error(`Unsupported public key format: length=${keyBytes.length}`);
+      }
+    }
+
+    // Keccak-256 hash of the 64-byte x,y coordinates
+    const hash = keccak256(uncompressedXY);
+    
+    // Take last 20 bytes (40 hex chars) and apply checksum
+    const addressLower = '0x' + hash.slice(-40);
+    
+    // Apply EIP-55 checksum casing
+    return getAddress(addressLower);
+  }
+
+  /**
+   * Decode base58 string to bytes (for NEAR public key format)
+   */
+  private decodeBase58(str: string): Uint8Array {
+    const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+    const ALPHABET_MAP = new Map<string, number>();
+    for (let i = 0; i < ALPHABET.length; i++) {
+      ALPHABET_MAP.set(ALPHABET[i], i);
+    }
+
+    let result = BigInt(0);
+    for (const char of str) {
+      const value = ALPHABET_MAP.get(char);
+      if (value === undefined) {
+        throw new Error(`Invalid base58 character: ${char}`);
+      }
+      result = result * BigInt(58) + BigInt(value);
+    }
+
+    // Convert to bytes
+    const hex = result.toString(16).padStart(2, '0');
+    const bytes = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < bytes.length; i++) {
+      bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+    }
+
+    return bytes;
+  }
+
+  private toBech32Address(publicKey: string, chain: SupportedChain): string {
+    // For Bitcoin/Dogecoin, use SHA-256 + RIPEMD-160 (placeholder)
+    // Full BIP-0173 bech32 implementation needed for production
+    const hash = createHash('sha256')
+      .update(Buffer.from(publicKey, 'hex'))
+      .digest('hex');
+    const prefix = chain === 'bitcoin' ? 'bc1q' : 'dgb1q';
+    const addr = hash.substring(0, 38);
     return `${prefix}${addr}`;
   }
 
-  private toEthereumAddress(hash: string): string {
-    const addr = hash.substring(hash.length - 40);
-    return `0x${addr}`;
-  }
-
-  private toRippleAddress(hash: string): string {
-    const addr = hash.substring(0, 40);
-    return `r${addr}`;
+  private toRippleAddress(publicKey: string): string {
+    // Ripple uses similar to Bitcoin but with different alphabet
+    const hash = createHash('sha256')
+      .update(Buffer.from(publicKey, 'hex'))
+      .digest('hex');
+    return `r${hash.substring(0, 33)}`;
   }
 
   /**

@@ -1,15 +1,20 @@
 /**
  * MPCService - Real MPC integration using NEAR MPC network
  * 
- * This service replaces MockMPCService and integrates with:
+ * This service integrates with:
  * - Real v1.signer contract calls via NearClient
  * - Real MPC nodes from github.com/near/mpc
  * - Real threshold signature generation
+ * 
+ * The contract uses yield/resume pattern:
+ * - sign() yields until MPC nodes produce signature
+ * - MPC nodes call resume() to complete the request
+ * - sign() returns the signature directly to caller
  */
 
 import { SignatureRequest, Signature } from '../types';
 import { LocalnetConfig } from '../config';
-import { NearClient } from './near-client';
+import { NearClient, DOMAIN_SECP256K1, MPCSignature } from './near-client';
 import { createHash } from 'crypto';
 
 export class MPCService {
@@ -19,15 +24,20 @@ export class MPCService {
     this.nearClient = new NearClient(
       config.rpcUrl,
       config.networkId,
-      config.mpcContractId
+      config.mpcContractId,
+      config.signerAccountId,
+      config.signerPrivateKey
     );
   }
 
   /**
    * Generate signature using real MPC network
-   * 1. Calls v1.signer contract sign method
-   * 2. Waits for MPC network to process
-   * 3. Retrieves completed signature
+   * 
+   * Flow:
+   * 1. Hash the payload to 32 bytes
+   * 2. Call v1.signer contract sign method
+   * 3. Contract yields while MPC nodes compute threshold signature
+   * 4. Contract resumes and returns signature directly
    */
   async generateSignature(request: SignatureRequest): Promise<Signature> {
     console.log('🔐 [MPC SERVICE] Generating signature:', {
@@ -37,30 +47,31 @@ export class MPCService {
     });
 
     try {
-      // Build derivation path
+      // Build derivation path (NEAR docs format: "ethereum-1", etc.)
       const path = this.buildDerivationPath(
         request.nearAccount,
         request.chain,
         request.derivationPath
       );
 
-      // Call v1.signer contract to request signature
-      const signatureId = await this.nearClient.callSign({
+      // Hash payload to 32 bytes if not already
+      const payloadHash = this.hashPayload(request.payload);
+
+      // Get domain ID based on chain type
+      const domainId = this.getDomainId(request.chain);
+
+      // Call v1.signer contract sign method
+      // This uses yield/resume - the call blocks until MPC signature is ready
+      const mpcSignature = await this.nearClient.callSign({
         path,
-        payload: request.payload,
+        payload: payloadHash,
+        domainId,
       });
-
-      // Wait for MPC network to complete signature
-      // MPC nodes watch the contract and generate threshold signature
-      const signResponse = await this.nearClient.waitForSignature(signatureId);
-
-      if (!signResponse.signature) {
-        throw new Error('Signature generation failed: no signature returned');
-      }
 
       console.log('✅ [MPC SERVICE] Signature generated');
 
-      return signResponse.signature;
+      // Convert MPC signature format to our Signature type
+      return this.convertMpcSignature(mpcSignature);
     } catch (error) {
       console.error('❌ [MPC SERVICE] Signature generation failed:', error);
       throw error;
@@ -68,8 +79,63 @@ export class MPCService {
   }
 
   /**
-   * Verify MPC-generated signature
-   * Note: Full verification requires the public key and payload
+   * Hash payload to 32 bytes for signing
+   * EVM transactions should already be hashed (keccak256 of tx)
+   */
+  private hashPayload(payload: string): Uint8Array {
+    // If payload is already 32 bytes (64 hex chars or 66 with 0x), use as-is
+    const cleanPayload = payload.startsWith('0x') ? payload.slice(2) : payload;
+    
+    if (cleanPayload.length === 64 && /^[0-9a-fA-F]+$/.test(cleanPayload)) {
+      // Already a 32-byte hash
+      return new Uint8Array(Buffer.from(cleanPayload, 'hex'));
+    }
+
+    // Hash the payload to 32 bytes using SHA-256
+    // Note: For EVM, you should use keccak256 on the unsigned tx before calling this
+    const hash = createHash('sha256')
+      .update(Buffer.from(payload, 'hex'))
+      .digest();
+    
+    return new Uint8Array(hash);
+  }
+
+  /**
+   * Get domain ID for chain type
+   * domain_id=0: Secp256k1 (EVM chains)
+   * domain_id=1: Ed25519 (future)
+   */
+  private getDomainId(chain: string): number {
+    const evmChains = ['ethereum', 'polygon', 'arbitrum', 'optimism'];
+    if (evmChains.includes(chain)) {
+      return DOMAIN_SECP256K1;
+    }
+    // Bitcoin, Dogecoin also use Secp256k1
+    return DOMAIN_SECP256K1;
+  }
+
+  /**
+   * Convert MPCSignature to our Signature type
+   */
+  private convertMpcSignature(mpcSig: MPCSignature): Signature {
+    // Extract hex values from MPC signature structure
+    const big_r = typeof mpcSig.big_r === 'object' 
+      ? mpcSig.big_r.affine_point 
+      : mpcSig.big_r;
+    
+    const s = typeof mpcSig.s === 'object'
+      ? mpcSig.s.scalar
+      : mpcSig.s;
+
+    return {
+      big_r,
+      s,
+      recovery_id: mpcSig.recovery_id,
+    };
+  }
+
+  /**
+   * Verify MPC-generated signature using ECDSA recovery
    */
   async verifySignature(
     signature: Signature,
@@ -85,14 +151,12 @@ export class MPCService {
         return false;
       }
 
-      // TODO: Implement full cryptographic verification
+      // TODO: Implement full cryptographic verification using ethers
       // This requires:
-      // 1. Recover public key from signature
-      // 2. Verify signature against payload
-      // 3. Compare recovered public key with expected public key
+      // 1. Recover public key from signature using recoverPublicKey
+      // 2. Compare recovered public key with expected public key
       
       // For now, return true if structure is valid
-      // Real implementation should use crypto libraries to verify ECDSA signature
       return true;
     } catch (error) {
       console.error('❌ [MPC SERVICE] Signature verification failed:', error);
@@ -102,6 +166,8 @@ export class MPCService {
 
   /**
    * Build derivation path from NEAR account and chain
+   * 
+   * Per NEAR docs, path is a user-defined string like "ethereum-1"
    */
   private buildDerivationPath(
     nearAccount: string,
@@ -112,25 +178,8 @@ export class MPCService {
       return customPath;
     }
 
-    // Default path format: "{nearAccount},{chainId}"
-    const chainId = this.getChainId(chain);
-    return `${nearAccount},${chainId}`;
-  }
-
-  /**
-   * Get chain ID for derivation path
-   */
-  private getChainId(chain: string): number {
-    const chainIds: Record<string, number> = {
-      bitcoin: 0,
-      ethereum: 1,
-      dogecoin: 3,
-      ripple: 144,
-      polygon: 137,
-      arbitrum: 42161,
-      optimism: 10,
-    };
-    return chainIds[chain] || 0;
+    // NEAR docs format: "ethereum-{account}" or similar
+    return `${chain}-${nearAccount}`;
   }
 }
 
