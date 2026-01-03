@@ -1,7 +1,9 @@
 #!/bin/bash
 
+# DEPRECATED: This script is a legacy workaround.
+# Use TEMP_redeploy_v1_signer_localnet.sh instead for a complete reset/redeploy.
+# 
 # Manually Add Domains via SSH to MPC Node
-# This is a quick workaround - proper solution is USE_MPC_SETUP=true on deployment
 
 set -e
 

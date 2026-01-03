@@ -159,13 +159,11 @@ npm run start:localnet
 npm run stop:localnet
 ```
 
-**Configuration**: The orchestrator now defaults to using MpcSetup (production-equivalent path) which:
+**MPC is REQUIRED for Layer 3 Chain Signatures.** The orchestrator:
 - Initializes contract with `init()` method
 - Votes to add ECDSA domain (domain_id: 0)
 - Triggers distributed key generation
 - Mirrors mainnet/testnet initialization flow
-
-To use legacy path (not recommended): `export USE_MPC_SETUP=false`
 
 **MPC Nodes Only:**
 ```bash
@@ -270,6 +268,35 @@ npm run cdk:synth    # Synthesize CloudFormation template
 npm run cdk:deploy   # Deploy infrastructure
 npm run cdk:destroy  # Remove infrastructure (KMS key retained)
 ```
+
+## Operational Tooling
+
+### Primary Deployment Mechanism: TypeScript Orchestrator
+
+Layer 3 deployment is driven by the **TypeScript `LocalnetOrchestrator`** class:
+
+```bash
+npm run start:localnet  # Calls LocalnetOrchestrator.start()
+```
+
+This orchestrator:
+- Reads AWS infrastructure state from CloudFormation
+- Deploys the v1.signer contract
+- Initializes with MPC participants
+- Votes to add ECDSA domains
+- Detects and auto-resets stale participant configurations (localnet only)
+
+### near-cli-rs for Operational Tasks
+
+The `near` CLI (near-cli-rs) is used for **operational tooling** on the NEAR base EC2 instance, not as the primary deployment mechanism.
+
+**Temp reset script** (for emergency recovery):
+```bash
+# Run on NEAR base instance via SSM
+./scripts/TEMP_redeploy_v1_signer_localnet.sh
+```
+
+This script uses near-cli-rs to delete/recreate/deploy/init the contract with current MPC participant URLs when the contract is stuck in "Initializing" state.
 
 ## Documentation
 

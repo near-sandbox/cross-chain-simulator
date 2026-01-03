@@ -406,6 +406,9 @@ export class MpcSetup {
 
   /**
    * Initialize contract with MPC participants
+   * 
+   * On localnet, if the contract is already initialized but has stale participant
+   * URLs/sign_pk (drift), this method will auto-reset and re-initialize the contract.
    */
   private async initializeContract(
     contractId: string,
@@ -419,22 +422,61 @@ export class MpcSetup {
       throw new Error("Master account not initialized");
     }
 
-    // Check if contract is already initialized
+    // Check if contract is already initialized and detect participant drift
     try {
-      await (this.contractAccount as any).viewFunction({
+      const stateResult = await (this.contractAccount as any).viewFunction({
         contractId,
         methodName: "state",
         args: {},
       });
-      console.log(`✅ [MPC-SETUP] Contract already initialized`);
+
+      // Parse on-chain participants from state
+      const onChainParticipants = this.extractParticipantsFromState(stateResult);
+      
+      if (onChainParticipants.length > 0) {
+        // Compare on-chain participants with expected participants
+        const drift = this.detectParticipantDrift(onChainParticipants, participants);
+        
+        if (drift.hasDrift) {
+          console.log(`⚠️  [MPC-SETUP] Participant drift detected!`);
+          console.log(`   On-chain vs expected differences:`);
+          for (const diff of drift.differences) {
+            console.log(`   - ${diff}`);
+          }
+          
+          if (this.networkId === "localnet") {
+            console.log(`\n🔄 [MPC-SETUP] Auto-resetting contract (localnet only)...`);
+            await this.resetAndRedeployContract(contractId, participants, threshold);
+            return;
+          } else {
+            // Non-localnet: fail fast with actionable error
+            throw new Error(
+              `Participant drift detected on ${this.networkId} network.\n` +
+              `The on-chain contract has different participant URLs/sign_pk than expected.\n` +
+              `Differences:\n${drift.differences.map(d => `  - ${d}`).join('\n')}\n\n` +
+              `This usually happens when MPC nodes were replaced but the contract wasn't reset.\n` +
+              `For localnet, this would be auto-fixed. For other networks, manual intervention is required.`
+            );
+          }
+        }
+      }
+      
+      console.log(`✅ [MPC-SETUP] Contract already initialized with correct participants`);
       return;
     } catch (error: any) {
+      const msg = error?.message || String(error);
+      // If the error is our drift error, re-throw it
+      if (msg.includes("Participant drift detected")) {
+        throw error;
+      }
+      // Otherwise, contract is not initialized - proceed with init
       if (
-        !error?.message?.includes("not initialized") &&
-        !error?.message?.includes("does not exist")
+        !msg.includes("not initialized") &&
+        !msg.includes("does not exist") &&
+        !msg.includes("Protocol state is not running")
       ) {
         console.warn(
-          `⚠️  [MPC-SETUP] Unexpected error checking initialization: ${error?.message || String(error)}`
+          `⚠️  [MPC-SETUP] Unexpected error checking initialization: ${msg}`
         );
       }
     }
@@ -599,5 +641,225 @@ export class MpcSetup {
       }
       throw error;
     }
+  }
+
+  // ─── Drift Detection and Auto-Reset (localnet only) ──────────────────────
+
+  /**
+   * Extract participant info from contract state() response.
+   * The state can be in various protocol states (Running, Initializing, Resharing).
+   */
+  private extractParticipantsFromState(state: any): ParticipantInfo[] {
+    const participants: ParticipantInfo[] = [];
+
+    try {
+      // State structure varies by protocol state. Look for participants in common locations.
+      // Running: { Running: { public_key, participants: { participants: [[accountId, idx, {sign_pk, url}], ...] } } }
+      // Initializing: { Initializing: { participants: { participants: [...] } } }
+      // Resharing: { Resharing: { ... } }
+
+      let participantsData: any = null;
+
+      if (state?.Running?.participants?.participants) {
+        participantsData = state.Running.participants.participants;
+      } else if (state?.Initializing?.participants?.participants) {
+        participantsData = state.Initializing.participants.participants;
+      } else if (state?.Resharing?.old_participants?.participants) {
+        participantsData = state.Resharing.old_participants.participants;
+      }
+
+      if (Array.isArray(participantsData)) {
+        for (const entry of participantsData) {
+          // Entry format: [accountId, index, { sign_pk, url }]
+          if (Array.isArray(entry) && entry.length >= 3) {
+            const [accountId, index, info] = entry;
+            if (accountId && typeof index === "number" && info) {
+              participants.push({
+                accountId: String(accountId),
+                index: Number(index),
+                signPk: String(info.sign_pk || ""),
+                url: String(info.url || ""),
+              });
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn(`⚠️  [MPC-SETUP] Failed to parse participants from state: ${e}`);
+    }
+
+    return participants;
+  }
+
+  /**
+   * Detect drift between on-chain participants and expected participants.
+   * Returns differences in URL or sign_pk.
+   */
+  private detectParticipantDrift(
+    onChain: ParticipantInfo[],
+    expected: ParticipantInfo[]
+  ): { hasDrift: boolean; differences: string[] } {
+    const differences: string[] = [];
+
+    // Build lookup by accountId for comparison
+    const onChainMap = new Map<string, ParticipantInfo>();
+    for (const p of onChain) {
+      onChainMap.set(p.accountId, p);
+    }
+
+    const expectedMap = new Map<string, ParticipantInfo>();
+    for (const p of expected) {
+      expectedMap.set(p.accountId, p);
+    }
+
+    // Check for missing participants
+    for (const [accountId] of expectedMap) {
+      if (!onChainMap.has(accountId)) {
+        differences.push(`Missing participant: ${accountId}`);
+      }
+    }
+
+    // Check for extra participants
+    for (const [accountId] of onChainMap) {
+      if (!expectedMap.has(accountId)) {
+        differences.push(`Extra on-chain participant: ${accountId}`);
+      }
+    }
+
+    // Check for URL/sign_pk mismatches
+    for (const [accountId, expectedP] of expectedMap) {
+      const onChainP = onChainMap.get(accountId);
+      if (onChainP) {
+        if (onChainP.url !== expectedP.url) {
+          differences.push(
+            `${accountId} URL mismatch: on-chain="${onChainP.url}" expected="${expectedP.url}"`
+          );
+        }
+        if (onChainP.signPk !== expectedP.signPk) {
+          differences.push(
+            `${accountId} sign_pk mismatch: on-chain="${onChainP.signPk.slice(0, 20)}..." expected="${expectedP.signPk.slice(0, 20)}..."`
+          );
+        }
+      }
+    }
+
+    return {
+      hasDrift: differences.length > 0,
+      differences,
+    };
+  }
+
+  /**
+   * Reset and redeploy the contract with correct participants.
+   * ONLY for localnet - will delete the contract account and recreate it.
+   */
+  private async resetAndRedeployContract(
+    contractId: string,
+    participants: ParticipantInfo[],
+    threshold: number
+  ): Promise<void> {
+    if (this.networkId !== "localnet") {
+      throw new Error("resetAndRedeployContract is only allowed on localnet");
+    }
+
+    if (!this.near || !this.masterAccount || !this.signerAccount) {
+      throw new Error("NEAR/accounts not initialized for reset");
+    }
+
+    const masterKeyPair = KeyPair.fromString(this.options.masterAccountPrivateKey as any);
+    const signerAccountId = this.getSignerAccountIdFromContractId(contractId);
+
+    console.log(`🗑️  [MPC-SETUP] Deleting contract account ${contractId}...`);
+
+    try {
+      // Delete the contract account, returning funds to parent (signer.localnet)
+      const contractAccount = await this.near.account(contractId);
+      await (contractAccount as any).deleteAccount(signerAccountId);
+      console.log(`   ✅ Contract account deleted`);
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      if (msg.includes("does not exist")) {
+        console.log(`   ✅ Contract account already deleted`);
+      } else {
+        console.warn(`   ⚠️  Delete failed: ${msg}`);
+        // Continue anyway - account may be in weird state
+      }
+    }
+
+    // Wait for deletion to propagate
+    await new Promise((r) => setTimeout(r, 2000));
+
+    // Recreate contract account
+    console.log(`📝 [MPC-SETUP] Recreating contract account ${contractId}...`);
+    
+    await this.signerAccount.createAccount(
+      contractId,
+      masterKeyPair.getPublicKey(),
+      utils.format.parseNearAmount("50")!
+    );
+    await this.keyStore.setKey(this.networkId, contractId, masterKeyPair);
+    console.log(`   ✅ Contract account recreated`);
+
+    // Wait for creation to propagate
+    await new Promise((r) => setTimeout(r, 2000));
+
+    // Refresh contract account reference
+    this.contractAccount = await this.near.account(contractId);
+
+    // Redeploy contract
+    console.log(`📦 [MPC-SETUP] Redeploying contract...`);
+    await this.deployContract(contractId);
+
+    // Wait for deployment to propagate
+    await new Promise((r) => setTimeout(r, 2000));
+
+    // Re-initialize with correct participants
+    console.log(`🔧 [MPC-SETUP] Re-initializing contract with correct participants...`);
+    
+    const initArgs = {
+      parameters: {
+        participants: {
+          next_id: participants.length,
+          participants: participants.map((p) => [
+            p.accountId,
+            p.index,
+            {
+              sign_pk: p.signPk,
+              url: p.url,
+            },
+          ]),
+        },
+        threshold,
+      },
+    };
+
+    const maxAttempts = 5;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await (this.masterAccount as any).functionCall({
+          contractId,
+          methodName: "init",
+          args: initArgs,
+          gas: BigInt("300000000000000"),
+        });
+        break;
+      } catch (e: any) {
+        const msg = e?.message || String(e);
+        if (
+          msg.includes("Transaction parent block hash doesn't belong to the current chain") &&
+          attempt < maxAttempts
+        ) {
+          const delayMs = 1500 * attempt;
+          console.warn(
+            `   ⚠️  Init failed due to block hash mismatch (attempt ${attempt}/${maxAttempts}). Retrying...`
+          );
+          await new Promise((r) => setTimeout(r, delayMs));
+          continue;
+        }
+        throw e;
+      }
+    }
+
+    console.log(`✅ [MPC-SETUP] Contract reset and re-initialized with correct participants`);
   }
 }

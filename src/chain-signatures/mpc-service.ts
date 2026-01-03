@@ -19,6 +19,7 @@ import { createHash } from 'crypto';
 
 export class MPCService {
   private nearClient: NearClient;
+  private signerAccountId?: string;
 
   constructor(config: LocalnetConfig) {
     this.nearClient = new NearClient(
@@ -28,6 +29,7 @@ export class MPCService {
       config.signerAccountId,
       config.signerPrivateKey
     );
+    this.signerAccountId = config.signerAccountId;
   }
 
   /**
@@ -47,12 +49,17 @@ export class MPCService {
     });
 
     try {
+      // The contract derives the signing key from env::predecessor_account_id() + path.
+      // That means we cannot sign "on behalf of" another account: the signer account IS the key owner.
+      if (this.signerAccountId && this.signerAccountId !== request.nearAccount) {
+        throw new Error(
+          `Signer account mismatch: config.signerAccountId=${this.signerAccountId} but request.nearAccount=${request.nearAccount}. ` +
+          `These must match for address derivation/signature parity.`
+        );
+      }
+
       // Build derivation path (NEAR docs format: "ethereum-1", etc.)
-      const path = this.buildDerivationPath(
-        request.nearAccount,
-        request.chain,
-        request.derivationPath
-      );
+      const path = this.buildDerivationPath(request.chain, request.derivationPath);
 
       // Hash payload to 32 bytes if not already
       const payloadHash = this.hashPayload(request.payload);
@@ -102,8 +109,7 @@ export class MPCService {
 
   /**
    * Get domain ID for chain type
-   * domain_id=0: Secp256k1 (EVM chains)
-   * domain_id=1: Ed25519 (future)
+   * DomainId(0) is the legacy/default ECDSA (Secp256k1) domain in the upstream contract.
    */
   private getDomainId(chain: string): number {
     const evmChains = ['ethereum', 'polygon', 'arbitrum', 'optimism'];
@@ -169,17 +175,13 @@ export class MPCService {
    * 
    * Per NEAR docs, path is a user-defined string like "ethereum-1"
    */
-  private buildDerivationPath(
-    nearAccount: string,
-    chain: string,
-    customPath?: string
-  ): string {
+  private buildDerivationPath(chain: string, customPath?: string): string {
     if (customPath) {
       return customPath;
     }
 
     // NEAR docs format: "ethereum-{account}" or similar
-    return `${chain}-${nearAccount}`;
+    return `${chain}-1`;
   }
 }
 

@@ -1,62 +1,44 @@
 /**
  * Localnet Orchestrator
  * 
- * Coordinates connection to EC2 NEAR localnet RPC, contract deployment, and MPC node startup.
+ * Coordinates connection to EC2 NEAR localnet RPC, contract deployment, and MPC network setup.
+ * 
+ * MPC is REQUIRED for Layer 3 Chain Signatures - there is no non-MPC path.
+ * 
  * Note: EC2 NEAR node is deployed separately via /AWSNodeRunner/lib/near
  */
 
-import { ContractDeployer } from './contract-deployer';
-import { KMSKeyManager } from './kms-key-manager';
-import { MpcSetup, MpcSetupOptions } from './mpc-setup';
+import { MpcSetup } from './mpc-setup';
 import { InfrastructureConfigReader } from '../aws/infrastructure-config';
-import { LocalnetConfig, getNearRpcUrl, getMpcContractId, getMpcNodes, getDeployerAccountId, getMasterAccountId, getDeployerKmsKeyId, getMasterAccountKeyArn, getMpcStackName, getNearStackName, getAwsRegion, getAwsProfile } from '../config';
+import { LocalnetConfig, getNearRpcUrl, getMpcContractId, getMpcNodes, getMasterAccountKeyArn, getMpcStackName, getNearStackName, getAwsProfile } from '../config';
 import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-
-const execAsync = promisify(exec);
 
 export interface OrchestratorConfig {
   rpcUrl?: string;
   networkId?: string;
-  deployerAccountId?: string;
-  masterAccountId?: string;
-  kmsKeyId?: string;
   contractAccountId?: string;
   wasmPath?: string;
-  // Optional: Pre-encrypted deployer private key (if deployer account already exists)
-  encryptedDeployerPrivateKey?: string;
-  // Optional: Master account key ARN from AWS Node Runner (preferred, production)
+  // Master account key ARN from AWS Node Runner (preferred, production)
   masterAccountKeyArn?: string;
-  // Optional: Master account private key (fallback for local dev only)
+  // Master account private key (fallback for local dev only)
   masterAccountPrivateKey?: string;
-  // Optional: AWS region for Secrets Manager (defaults to us-east-1)
+  // AWS region for Secrets Manager (defaults to us-east-1)
   region?: string;
-  // Optional: Use new MPC setup module (default: false, uses legacy deployer)
-  useMpcSetup?: boolean;
-  // Optional: Threshold for MPC signing (default: 2)
+  // Threshold for MPC signing (default: 2)
   mpcThreshold?: number;
 }
 
 export class LocalnetOrchestrator {
-  private deployer: ContractDeployer;
   private config: LocalnetConfig;
   private masterAccountKeyArn?: string;
   private masterAccountPrivateKey?: string;
   private region: string;
+  private mpcThreshold: number;
 
   constructor(config: OrchestratorConfig = {}) {
     const rpcUrl = config.rpcUrl || getNearRpcUrl();
-    const networkId = config.networkId || 'localnet';
-    const deployerAccountId = config.deployerAccountId || getDeployerAccountId();
-    const masterAccountId = config.masterAccountId || getMasterAccountId();
-    const kmsKeyId = config.kmsKeyId || getDeployerKmsKeyId();
     this.region = config.region || process.env.AWS_REGION || 'us-east-1';
-
-    // Determine which path we're using (MPC Setup is default)
-    const useMpcSetup = config.useMpcSetup !== undefined 
-      ? config.useMpcSetup 
-      : process.env.USE_MPC_SETUP !== 'false';  // Defaults to true
+    this.mpcThreshold = config.mpcThreshold || 2;
 
     // Validate key source (must have one)
     const masterKeyArn = config.masterAccountKeyArn || getMasterAccountKeyArn();
@@ -75,37 +57,9 @@ export class LocalnetOrchestrator {
       console.warn('⚠️  [ORCHESTRATOR] Both masterAccountKeyArn and masterAccountPrivateKey provided. Using ARN (preferred).');
     }
 
-    // Only require KMS and create ContractDeployer for legacy path
-    if (!useMpcSetup) {
-      if (!kmsKeyId) {
-        throw new Error('KMS key ID is required for legacy ContractDeployer path. Set DEPLOYER_KMS_KEY_ID environment variable.');
-    }
-
-    const kmsManager = new KMSKeyManager({
-      keyId: kmsKeyId,
-      region: this.region,
-    });
-
-    this.deployer = new ContractDeployer({
-      rpcUrl,
-      networkId,
-      deployerAccountId,
-      masterAccountId,
-      kmsManager,
-      encryptedDeployerPrivateKey: config.encryptedDeployerPrivateKey,
-    });
-    } else {
-      // MPC Setup path doesn't need ContractDeployer or KMS
-      this.deployer = undefined as any; // Will not be used in MPC Setup path
-    }
-
     // Store key source for later use in start()
     this.masterAccountKeyArn = masterKeyArn;
     this.masterAccountPrivateKey = masterKeyDirect;
-
-    // Store MPC setup options
-    (this as any).useMpcSetup = useMpcSetup;
-    (this as any).mpcThreshold = config.mpcThreshold;
 
     this.config = {
       rpcUrl,
@@ -116,84 +70,23 @@ export class LocalnetOrchestrator {
   }
 
   /**
-   * Start full infrastructure: connect to EC2 RPC, deploy contracts, start MPC
+   * Start full infrastructure: connect to EC2 RPC, deploy contracts, setup MPC network.
+   * 
+   * MPC is REQUIRED for Layer 3 Chain Signatures - this method always uses the MPC setup path.
    */
   async start(): Promise<LocalnetConfig> {
     console.log('🚀 [ORCHESTRATOR] Connecting to NEAR localnet and deploying infrastructure...');
     console.log('   RPC URL:', this.config.rpcUrl);
     console.log('   Contract:', this.config.mpcContractId);
 
-    // Check if using new MPC setup module
-    // DEFAULT TO TRUE for production-equivalent deployment
-    const useMpcSetup = (this as any).useMpcSetup !== undefined 
-      ? (this as any).useMpcSetup 
-      : process.env.USE_MPC_SETUP !== 'false';  // Changed: Now defaults to TRUE
-
-    if (useMpcSetup) {
-      // Use new MPC setup module (reads from AWS infrastructure)
-      // This is the PRODUCTION-EQUIVALENT path that:
-      // - Initializes contract with init()
-      // - Votes to add domains (Secp256k1 for ECDSA)
-      // - Triggers distributed key generation
-      // - Ready for signing after keys generate
-      console.log('\n📦 [ORCHESTRATOR] Using MPC Setup module (production-equivalent path)...');
-      return await this.setupMpcApplicationLayer();
-    } else {
-      // Legacy flow (uses contract deployer)
-      // Only use if explicitly set USE_MPC_SETUP=false
-      console.log('\n⚠️  [ORCHESTRATOR] Using legacy path (incomplete initialization)');
-      console.log('   Set USE_MPC_SETUP=true for production-equivalent deployment');
-      return await this.startLegacy();
-    }
-  }
-
-  /**
-   * Legacy start flow (uses ContractDeployer)
-   */
-  private async startLegacy(): Promise<LocalnetConfig> {
-    // 1. Verify EC2 NEAR RPC is accessible
-    console.log('\n📡 [ORCHESTRATOR] Verifying RPC connection...');
-    await this.verifyRpcConnection();
-
-    // 1.5. Retrieve and add master account key
-    console.log('\n🔑 [ORCHESTRATOR] Retrieving master account key...');
-    const masterKey = await this.getMasterAccountKey();
-    await this.deployer.addMasterAccountKey(masterKey);
-
-    // 2. Initialize master account (if needed)
-    console.log('\n👤 [ORCHESTRATOR] Initializing master account...');
-    await this.deployer.initializeMasterAccount();
-
-    // 3. Create deployer account (if needed)
-    console.log('\n🔑 [ORCHESTRATOR] Creating deployer account...');
-    await this.deployer.createDeployerAccount();
-
-    // 4. Deploy v1.signer contract (if not exists)
-    console.log('\n📦 [ORCHESTRATOR] Deploying v1.signer contract...');
-    const contractId = await this.deployer.deploySignerContract(
-      this.config.mpcContractId,
-      undefined // wasmPath - will use default contracts/v1.signer.wasm
-    );
-
-    // Update config with actual contract ID (may have changed if timestamped)
-    this.config.mpcContractId = contractId;
-
-    // 5. Start MPC nodes via Docker
-    console.log('\n🔗 [ORCHESTRATOR] Starting MPC nodes...');
-    await this.startMpcNodes(contractId);
-
-    // 6. Wait for all services to be ready
-    console.log('\n⏳ [ORCHESTRATOR] Waiting for services to be ready...');
-    await this.healthCheck();
-
-    console.log('\n✅ [ORCHESTRATOR] Infrastructure ready!');
-    console.log('   Contract:', contractId);
-    console.log('   MPC Nodes:', this.config.mpcNodes.join(', '));
-
-    return {
-      ...this.config,
-      mpcContractId: contractId,
-    };
+    // MPC setup is the only supported path for Layer 3.
+    // This path:
+    // - Initializes contract with init()
+    // - Votes to add domains (Secp256k1 for ECDSA)
+    // - Triggers distributed key generation
+    // - Ready for signing after keys generate
+    console.log('\n📦 [ORCHESTRATOR] Setting up MPC network...');
+    return await this.setupMpcApplicationLayer();
   }
 
   /**
@@ -222,7 +115,7 @@ export class LocalnetOrchestrator {
       infrastructureConfig: infraConfig,
       masterAccountPrivateKey: masterKey,
       wasmPath: undefined, // Use default contracts/v1.signer.wasm
-      threshold: (this as any).mpcThreshold || 2,
+      threshold: this.mpcThreshold,
       region: this.region,
       profile: getAwsProfile(),
     });
@@ -252,58 +145,6 @@ export class LocalnetOrchestrator {
       ...this.config,
       mpcContractId: result.contractId,
     };
-  }
-
-  /**
-   * Stop MPC infrastructure (contracts persist on blockchain)
-   */
-  async stop(): Promise<void> {
-    console.log('🛑 [ORCHESTRATOR] Stopping MPC infrastructure...');
-
-    try {
-      const path = require('path');
-      const scriptPath = path.join(__dirname, '../../scripts/stop-mpc.sh');
-      await execAsync(`bash ${scriptPath}`);
-      console.log('✅ [ORCHESTRATOR] MPC nodes stopped');
-    } catch (error) {
-      console.error('❌ [ORCHESTRATOR] Failed to stop MPC nodes:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Verify RPC connection
-   */
-  private async verifyRpcConnection(): Promise<void> {
-    try {
-      await this.deployer.verifyRpcConnection();
-    } catch (error) {
-      throw new Error(`RPC connection verification failed: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
-  /**
-   * Start MPC nodes via Docker
-   */
-  private async startMpcNodes(contractId: string): Promise<void> {
-    try {
-      // Set environment variables for MPC startup
-      process.env.MPC_CONTRACT_ID = contractId;
-      process.env.NEAR_RPC_URL = this.config.rpcUrl;
-
-      const path = require('path');
-      const scriptPath = path.join(__dirname, '../../scripts/start-mpc.sh');
-      const { stdout, stderr } = await execAsync(`bash ${scriptPath}`);
-
-      if (stderr && !stderr.includes('Warning')) {
-        console.warn('⚠️  [ORCHESTRATOR] MPC startup warnings:', stderr);
-      }
-
-      console.log('✅ [ORCHESTRATOR] MPC nodes started');
-    } catch (error: any) {
-      console.error('❌ [ORCHESTRATOR] Failed to start MPC nodes:', error.message);
-      throw error;
-    }
   }
 
   /**
@@ -366,63 +207,41 @@ export class LocalnetOrchestrator {
     const maxAttempts = 30;
     const pollInterval = 2000; // 2 seconds
 
-    // Check contract deployment
+    // Check contract deployment via raw JSON-RPC (no keystore/signing required)
     console.log('   Checking contract deployment...');
-    const useMpcSetup = (this as any).useMpcSetup !== undefined 
-      ? (this as any).useMpcSetup 
-      : process.env.USE_MPC_SETUP !== 'false';
-
-    if (useMpcSetup) {
-      // For MPC Setup path, verify contract via raw JSON-RPC (no keystore/signing required).
-      for (let i = 0; i < maxAttempts; i++) {
-        try {
-          const response = await fetch(this.config.rpcUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              jsonrpc: '2.0',
-              id: 'mpc-healthcheck',
-              method: 'query',
-              params: {
-                request_type: 'view_account',
-                finality: 'final',
-                account_id: this.config.mpcContractId,
-              },
-            }),
-          });
-
-          const json: any = await response.json();
-          const codeHash = json?.result?.code_hash;
-          if (codeHash && codeHash !== '11111111111111111111111111111111') {
-            console.log('   ✅ Contract verified');
-            break;
-          }
-        } catch (error: any) {
-          if (i === maxAttempts - 1) {
-            throw new Error(`Contract deployment verification timeout: ${error.message}`);
-          }
-        }
-        await new Promise(resolve => setTimeout(resolve, pollInterval));
-      }
-    } else {
-      // Legacy path uses ContractDeployer
     for (let i = 0; i < maxAttempts; i++) {
-      const verified = await this.deployer.verifyContractDeployment(this.config.mpcContractId);
-      if (verified) {
-        console.log('   ✅ Contract verified');
-        break;
-      }
-      if (i === maxAttempts - 1) {
-        throw new Error('Contract deployment verification timeout');
+      try {
+        const response = await fetch(this.config.rpcUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 'mpc-healthcheck',
+            method: 'query',
+            params: {
+              request_type: 'view_account',
+              finality: 'final',
+              account_id: this.config.mpcContractId,
+            },
+          }),
+        });
+
+        const json: any = await response.json();
+        const codeHash = json?.result?.code_hash;
+        if (codeHash && codeHash !== '11111111111111111111111111111111') {
+          console.log('   ✅ Contract verified');
+          break;
+        }
+      } catch (error: any) {
+        if (i === maxAttempts - 1) {
+          throw new Error(`Contract deployment verification timeout: ${error.message}`);
+        }
       }
       await new Promise(resolve => setTimeout(resolve, pollInterval));
-      }
     }
 
-    // Check MPC nodes
-    const mpcHealthMode =
-      process.env.MPC_NODE_HEALTHCHECK ||
-      (useMpcSetup ? 'best_effort' : 'strict');
+    // Check MPC nodes (best_effort by default - VPC-only endpoints may not be reachable)
+    const mpcHealthMode = process.env.MPC_NODE_HEALTHCHECK || 'best_effort';
 
     if (mpcHealthMode === 'skip' || mpcHealthMode === 'false') {
       console.log('   Skipping MPC node health checks (MPC_NODE_HEALTHCHECK=skip)');
@@ -440,7 +259,7 @@ export class LocalnetOrchestrator {
             ok = true;
             break;
           }
-        } catch (error) {
+        } catch {
           // ignore and retry below
         }
         await new Promise(resolve => setTimeout(resolve, pollInterval));

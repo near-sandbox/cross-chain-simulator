@@ -126,16 +126,16 @@ npm run start:localnet
 ├─────────────────────────────────────────────────┤
 │ • npm run start:localnet (scripts)              │
 │ • LocalnetOrchestrator (TypeScript)             │
-│ • Docker (for MPC nodes)                        │
+│ • MPC nodes (via CDK on AWS ECS)                │
 └─────────────────────────────────────────────────┘
                     ↓ orchestrates
 ┌─────────────────────────────────────────────────┐
 │ Infrastructure Components                       │
 ├─────────────────────────────────────────────────┤
 │ 1. Connect to EC2 NEAR RPC                      │
-│ 2. Deploy deployer.localnet (legacy path)       │
-│ 3. Deploy v1.signer.localnet contract           │
-│ 4. Start MPC nodes (Docker)                     │
+│ 2. Deploy v1.signer.localnet contract           │
+│ 3. Initialize with MPC participants             │
+│ 4. Vote to add ECDSA domain                     │
 │ 5. Health checks                                │
 └─────────────────────────────────────────────────┘
 ```

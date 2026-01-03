@@ -1,15 +1,14 @@
 #!/bin/bash
 
 # Properly Initialize v1.signer Contract using MpcSetup
-# This uses the production-equivalent initialization path
+# MPC is REQUIRED for Layer 3 Chain Signatures.
 
 set -e
 
-echo "🔧 Initializing v1.signer contract using MpcSetup (production-equivalent)..."
+echo "🔧 Initializing v1.signer contract using MpcSetup..."
 echo ""
 
 # Configuration
-export USE_MPC_SETUP=true
 export NEAR_RPC_URL=http://localhost:13030  # MPC NEAR endpoint (via SSM)
 export DEPLOYER_KMS_KEY_ID=arn:aws:kms:us-east-1:311843862895:key/b2abcd6a-d5a3-49e4-8708-10cd84a2fb3a
 export MASTER_ACCOUNT_PRIVATE_KEY=ed25519:3J9URWyrEjxXNBy28RZGaU1NSP2eEgsGLSt1Pc8to1qurKDS9AT68EA2nWvuds87WBtQwSyLA5CFqWXahhidLCrb
@@ -17,9 +16,8 @@ export AWS_PROFILE=shai-sandbox-profile
 export AWS_REGION=us-east-1
 
 echo "📋 Configuration:"
-echo "   USE_MPC_SETUP: true (production-equivalent path)"
 echo "   NEAR_RPC_URL: $NEAR_RPC_URL"
-echo "   Using MpcSetup class for proper initialization"
+echo "   Using MpcSetup class for initialization"
 echo ""
 
 cd /Users/Shai.Perednik/Documents/code_workspace/near_mobile/cross-chain-simulator
@@ -44,9 +42,7 @@ const { LocalnetOrchestrator } = require('./dist/localnet/orchestrator');
   try {
     const orchestrator = new LocalnetOrchestrator({
       rpcUrl: process.env.NEAR_RPC_URL,
-      networkId: 'localnet',
       masterAccountPrivateKey: process.env.MASTER_ACCOUNT_PRIVATE_KEY,
-      useMpcSetup: true,  // Use production-equivalent path
       mpcThreshold: 2,
     });
 

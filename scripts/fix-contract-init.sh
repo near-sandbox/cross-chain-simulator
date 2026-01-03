@@ -2,6 +2,7 @@
 
 # Fix Contract Initialization
 # Call init() and vote_add_domains on the existing v1.signer contract
+# MPC is REQUIRED for Layer 3 Chain Signatures.
 
 set -e
 
@@ -11,23 +12,18 @@ echo ""
 # Check environment
 if [ -z "$MASTER_ACCOUNT_PRIVATE_KEY" ]; then
   echo "❌ MASTER_ACCOUNT_PRIVATE_KEY not set"
-  echo "   Export the node0 private key from your localnet"
+  echo "   Export the localnet master account private key"
   exit 1
-fi
-
-if [ -z "$USE_MPC_SETUP" ]; then
-  echo "📌 Setting USE_MPC_SETUP=true"
-  export USE_MPC_SETUP=true
 fi
 
 # Use MpcSetup to properly initialize
 cd /Users/Shai.Perednik/Documents/code_workspace/near_mobile/cross-chain-simulator
 
-echo "🔄 Rebuilding with updated MpcSetup..."
+echo "🔄 Rebuilding..."
 npm run build
 
 echo ""
-echo "🚀 Running orchestrator with MpcSetup (will initialize contract)..."
+echo "🚀 Running orchestrator (will initialize contract)..."
 echo "   This will:"
 echo "   1. Call init() on contract"
 echo "   2. Vote to add ECDSA domain (domain_id: 0)"
@@ -41,9 +37,7 @@ const { LocalnetOrchestrator } = require('./dist/localnet/orchestrator');
 (async () => {
   const orchestrator = new LocalnetOrchestrator({
     rpcUrl: 'http://localhost:13030',  // MPC NEAR endpoint
-    networkId: 'localnet',
     masterAccountPrivateKey: process.env.MASTER_ACCOUNT_PRIVATE_KEY,
-    useMpcSetup: true,  // Use proper initialization path
     mpcThreshold: 2,
   });
 

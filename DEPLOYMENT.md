@@ -212,7 +212,7 @@ npm run start:localnet
 | `NEAR_RPC_URL` | No | `http://localhost:3030` | NEAR RPC endpoint |
 | `MASTER_ACCOUNT_ID` | No | `localnet` | Master account name (localnet root) |
 | `MASTER_ACCOUNT_PRIVATE_KEY` | For first deployment | - | Master account private key |
-| `DEPLOYER_ACCOUNT_ID` | Optional | `deployer.localnet` | Deployer account name (legacy path only) |
+| `DEPLOYER_ACCOUNT_ID` | No | `deployer.localnet` | Deployer account name (deprecated, not used) |
 | `DEPLOYER_ENCRYPTED_KEY` | For reuse | - | Pre-encrypted deployer key |
 | `MPC_CONTRACT_ID` | No | `v1.signer.localnet` | MPC contract name |
 | `AWS_REGION` | No | `us-east-1` | AWS region for KMS |

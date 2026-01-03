@@ -5,8 +5,8 @@
  * for address derivation and signature requests.
  * 
  * Contract API (per NEAR docs and near/mpc):
- * - `public_key(domain_id: u32)` - returns the root MPC public key for a domain
- * - `derived_public_key(path: string, domain_id: u32)` - derives a child key for path
+ * - `public_key(domain_id?: DomainId)` - returns the root MPC public key for a domain (defaults to 0)
+ * - `derived_public_key(path: string, predecessor?: AccountId, domain_id?: DomainId)` - derives a child key
  * - `sign(request: SignRequest)` - yields, MPC signs, resumes with signature
  * 
  * @see https://docs.near.org/chain-abstraction/chain-signatures/getting-started
@@ -15,9 +15,10 @@
 import { connect, Near, Account, keyStores, KeyPair } from 'near-api-js';
 import { SignatureRequest } from '../types';
 
-// Domain IDs per NEAR Chain Signatures spec
-export const DOMAIN_SECP256K1 = 0; // EVM chains (Ethereum, Polygon, Arbitrum, etc.)
-export const DOMAIN_ED25519 = 1;   // Ed25519 chains (future)
+// NOTE: The upstream contract uses DomainId (u64), which identifies a key in its registry.
+// DomainId(0) is the legacy/default ECDSA (Secp256k1) domain.
+export const DOMAIN_SECP256K1 = 0;
+export const DOMAIN_ED25519 = 1; // May exist depending on how domains were added.
 
 export interface SignRequestParams {
   path: string;
@@ -25,19 +26,9 @@ export interface SignRequestParams {
   domainId?: number;
 }
 
-/**
- * Response from derived_public_key view call
- */
-export interface DerivedPublicKeyResponse {
-  public_key: string;
-}
-
-/**
- * Response from public_key view call (root key)
- */
-export interface RootPublicKeyResponse {
-  public_key: string;
-}
+// View methods return the public key as a plain JSON string: "secp256k1:..." / "ed25519:..."
+export type DerivedPublicKeyResponse = string;
+export type RootPublicKeyResponse = string;
 
 /**
  * MPC Signature returned from sign function call
@@ -133,14 +124,16 @@ export class NearClient {
         contractId: this.mpcContractId,
         methodName: 'public_key',
         args: { domain_id: domainId },
-      }) as RootPublicKeyResponse;
+      });
+
+      const publicKey = this.parsePublicKeyViewResult(result);
 
       console.log('✅ [NEAR CLIENT] Root public key:', {
         domainId,
-        publicKey: result.public_key.substring(0, 30) + '...',
+        publicKey: publicKey.substring(0, 30) + '...',
       });
 
-      return result.public_key;
+      return publicKey;
     } catch (error) {
       console.error('❌ [NEAR CLIENT] Failed to call public_key:', error);
       throw new Error(`Failed to get root public key: ${error instanceof Error ? error.message : String(error)}`);
@@ -176,23 +169,26 @@ export class NearClient {
         domain_id: domainId,
       };
       
-      // predecessor_id is optional - if not provided, contract uses tx predecessor
+      // `predecessor` is optional - if not provided, contract uses env::predecessor_account_id().
+      // For view calls, we almost always want to pass it explicitly so derivation matches a real caller.
       if (predecessorId) {
-        args.predecessor_id = predecessorId;
+        args.predecessor = predecessorId;
       }
 
       const result = await this.viewAccount.viewFunction({
         contractId: this.mpcContractId,
         methodName: 'derived_public_key',
         args,
-      }) as DerivedPublicKeyResponse;
+      });
+
+      const publicKey = this.parsePublicKeyViewResult(result);
 
       console.log('✅ [NEAR CLIENT] Derived public key:', {
         path,
-        publicKey: result.public_key.substring(0, 30) + '...',
+        publicKey: publicKey.substring(0, 30) + '...',
       });
 
-      return result.public_key;
+      return publicKey;
     } catch (error) {
       console.error('❌ [NEAR CLIENT] Failed to call derived_public_key:', error);
       throw new Error(`Failed to derive public key: ${error instanceof Error ? error.message : String(error)}`);
@@ -203,8 +199,8 @@ export class NearClient {
    * Legacy method for backwards compatibility
    * Calls derived_public_key with Secp256k1 domain
    */
-  async callPublicKey(path: string): Promise<string> {
-    return this.callDerivedPublicKey(path, DOMAIN_SECP256K1);
+  async callPublicKey(path: string, predecessorId?: string): Promise<string> {
+    return this.callDerivedPublicKey(path, DOMAIN_SECP256K1, predecessorId);
   }
 
   /**
@@ -325,6 +321,32 @@ export class NearClient {
     }
 
     throw new Error('Failed to parse signature from transaction result');
+  }
+
+  private parsePublicKeyViewResult(result: unknown): string {
+    // Upstream contract returns a plain JSON string, e.g. "secp256k1:..."
+    if (typeof result === 'string') {
+      return result;
+    }
+
+    // Defensive: handle possible { Ok: "..."} or legacy shapes.
+    if (result && typeof result === 'object') {
+      const obj = result as Record<string, unknown>;
+      if (typeof obj.public_key === 'string') {
+        return obj.public_key;
+      }
+      if (typeof obj.Ok === 'string') {
+        return obj.Ok;
+      }
+      if (obj.Ok && typeof obj.Ok === 'object') {
+        const okObj = obj.Ok as Record<string, unknown>;
+        if (typeof okObj.public_key === 'string') {
+          return okObj.public_key;
+        }
+      }
+    }
+
+    throw new Error(`Unexpected public key response: ${JSON.stringify(result)}`);
   }
 }
 

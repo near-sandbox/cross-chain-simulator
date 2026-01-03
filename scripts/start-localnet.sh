@@ -1,8 +1,7 @@
 #!/bin/bash
 
-# Enable production-equivalent MPC setup by default
-export USE_MPC_SETUP=${USE_MPC_SETUP:-true}
 # Connect to EC2 NEAR localnet RPC and deploy Chain Signatures infrastructure
+# MPC is REQUIRED for Layer 3 - there is no non-MPC path.
 # Note: EC2 NEAR node deployed separately via /AWSNodeRunner/lib/near
 # This script manages contract deployment and MPC nodes only
 

@@ -16,7 +16,7 @@ import {
   SignatureResponse,
 } from '../types';
 import { LocalnetConfig } from '../config';
-import { NearClient } from './near-client';
+import { NearClient, DOMAIN_SECP256K1 } from './near-client';
 import { MPCService } from './mpc-service';
 import { createHash } from 'crypto';
 import { keccak256, getAddress, computeAddress } from 'ethers';
@@ -59,7 +59,11 @@ export class ChainSignaturesSimulator implements IChainSignatures, ICrossChainEx
 
     try {
       // Call v1.signer contract to get MPC-derived public key
-      const publicKey = await this.nearClient.callPublicKey(derivationPath);
+      const publicKey = await this.nearClient.callDerivedPublicKey(
+        derivationPath,
+        DOMAIN_SECP256K1,
+        nearAccount
+      );
 
       // Convert MPC public key to chain-specific address
       const address = this.publicKeyToAddress(publicKey, chain);
@@ -95,8 +99,9 @@ export class ChainSignaturesSimulator implements IChainSignatures, ICrossChainEx
    */
   private buildDefaultPath(nearAccount: string, chain: SupportedChain): string {
     // NEAR docs example format: "ethereum-1", "bitcoin-main"
-    // We use a deterministic format based on account + chain for uniqueness
-    return `${chain}-${nearAccount}`;
+    // Uniqueness comes from the caller's account ID (predecessor) + the chosen path.
+    // Keep the default path stable and chain-scoped.
+    return `${chain}-1`;
   }
 
   /**
