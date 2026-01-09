@@ -1,0 +1,115 @@
+---
+description: EFS + ECS integration patterns for MPC nodes
+globs:
+  - "**/mpc-repo/**/*.ts"
+  - "**/*ecs*.ts"
+  - "**/*efs*.ts"
+alwaysApply: false
+---
+
+# EFS + ECS Integration for MPC Nodes
+
+## Critical Rule
+
+AWS CDK does **NOT** automatically configure security groups to allow ECS tasks to mount EFS. You **MUST** explicitly configure this.
+
+## Common Error Pattern
+
+```
+ResourceInitializationError: failed to invoke EFS utils commands to set up EFS volumes
+mount.nfs4: mount system call failed
+```
+
+**Cause**: ECS tasks cannot reach EFS on port 2049 (NFS)
+
+## Correct Implementation Pattern
+
+### 1. Create Security Groups in Correct Order
+
+```typescript
+// STEP 1: Create ECS task security group FIRST
+const ecsSecurityGroup = new ec2.SecurityGroup(this, 'EcsSecurityGroup', {
+  vpc,
+  description: 'Security group for ECS tasks',
+  allowAllOutbound: true,
+});
+
+// STEP 2: Create EFS with explicit security group
+const efsSecurityGroup = new ec2.SecurityGroup(this, 'EfsSecurityGroup', {
+  vpc,
+  description: 'Security group for EFS',
+  allowAllOutbound: false,
+});
+
+const fileSystem = new efs.FileSystem(this, 'FileSystem', {
+  vpc,
+  securityGroup: efsSecurityGroup, // ← CRITICAL
+});
+
+// STEP 3: Allow NFS traffic from ECS to EFS
+fileSystem.connections.allowFrom(
+  ecsSecurityGroup,
+  ec2.Port.tcp(2049),
+  'Allow NFS from ECS tasks'
+);
+```
+
+### 2. Task Definition Configuration
+
+```typescript
+taskDefinition.addVolume({
+  name: 'efs-storage',
+  efsVolumeConfiguration: {
+    fileSystemId: fileSystem.fileSystemId,
+    authorizationConfig: {
+      accessPointId: accessPoint.accessPointId,
+      iam: 'ENABLED',
+    },
+    transitEncryption: 'ENABLED',
+  },
+});
+```
+
+### 3. IAM Permissions
+
+```typescript
+executionRole.addToPolicy(new iam.PolicyStatement({
+  actions: [
+    'elasticfilesystem:ClientMount',
+    'elasticfilesystem:ClientWrite',
+  ],
+  resources: [fileSystem.fileSystemArn],
+}));
+```
+
+## Checklist Before Deployment
+
+- [ ] ECS security group created FIRST
+- [ ] EFS security group created with `allowAllOutbound: false`
+- [ ] EFS file system references custom security group
+- [ ] NFS (port 2049) allowed from ECS SG to EFS SG
+- [ ] EFS mount targets in same subnets as ECS tasks
+- [ ] Task execution role has EFS mount permissions
+
+## Debugging EFS Mount Issues
+
+```bash
+# Get EFS security group ID
+aws efs describe-file-systems --file-system-id fs-xxx --profile shai-sandbox-profile
+
+# Check inbound rules
+aws ec2 describe-security-groups --group-ids sg-xxx --profile shai-sandbox-profile
+
+# Get service events
+aws ecs describe-services --cluster xxx --services xxx --profile shai-sandbox-profile
+```
+
+Look for: `ResourceInitializationError: failed to invoke EFS utils commands`
+
+## Key Takeaway
+
+EFS + ECS integration requires explicit security group configuration. Always:
+1. Create ECS security group first
+2. Create EFS with explicit security group
+3. Add NFS (port 2049) ingress rule from ECS to EFS
+4. Grant IAM permissions for EFS access

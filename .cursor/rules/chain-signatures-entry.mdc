@@ -1,0 +1,103 @@
+---
+alwaysApply: true
+description: Layer 3 entry rule - Chain Signatures with embedded MPC infrastructure
+---
+
+# Layer 3: Chain Signatures - Entry Rule
+
+**Cross-chain signing primitives with embedded MPC infrastructure**
+
+## Layer Position
+
+```
+Layer 1: NEAR Base          → AWSNodeRunner
+Layer 2: NEAR Services      → near-localnet-services
+Layer 3: Chain Signatures   → This repository ← YOU ARE HERE (includes MPC)
+Layer 4: Intents Protocol   → near-intents-simulator
+Layer 5: User Applications  → Your dApp
+```
+
+**Depends on**: Layer 2 (NEAR Services)
+**Provides to**: Layer 4 (Intents Protocol) - Chain Signatures API
+
+## Critical: MPC is Embedded Here
+
+MPC infrastructure is NOT a separate layer. It's embedded within this repository:
+
+```
+cross-chain-simulator/
+├── src/chain-signatures/           # Chain Signatures API
+└── cross-chain-simulator/mpc-repo/ # Embedded MPC infrastructure
+    └── infra/aws-cdk/              # AWS CDK for MPC nodes
+```
+
+When deploying Layer 3, you deploy:
+1. MPC infrastructure (3-8 nodes)
+2. v1.signer contract
+3. Chain Signatures API
+
+## What This Layer Provides
+
+- Address derivation for BTC, ETH, DOGE, etc.
+- Transaction signing via MPC threshold signatures
+- v1.signer contract interaction
+- Production-equivalent API matching mainnet
+
+## Outputs
+
+```typescript
+{
+  v1_signer_contract_id: "v1.signer.node0",
+  mpc_node_endpoints: ["http://10.0.x.x:8080", ...],
+  chain_signatures_config: {...}
+}
+```
+
+## Deployment
+
+```bash
+# Via Orchestrator
+cd /near-localnet-orchestrator
+npx near-orchestrator deploy near_base near_services chain_signatures
+
+# Direct
+npm run start:localnet  # Starts MPC nodes + v1.signer contract
+npm run stop:localnet   # Stops infrastructure
+```
+
+## Specialized Rules
+
+Request these rules when working on specific tasks:
+
+- **aws-dynamic-value-discovery.mdc** - Dynamic AWS value lookup, NEVER hardcode
+- **layer3-mpc-runtime-stability.mdc** - MPC node health, debugging, secrets management
+- **mpc-repo/mpc-aws-infra.mdc** - MPC CDK infrastructure patterns
+- **mpc-repo/near-mpc-repo.mdc** - MPC crate structure, Rust patterns
+
+## Key Commands
+
+```bash
+# AWS value discovery (never hardcode!)
+aws cloudformation describe-stacks --stack-name MpcStandaloneStack \
+  --query "Stacks[0].Outputs" --profile shai-sandbox-profile
+
+# MPC node health
+curl -s http://<mpc-ip>:8080/public_data | jq
+
+# SSM into MPC node
+aws ssm start-session --target <instance-id> --profile shai-sandbox-profile
+```
+
+## Key Notes
+
+1. **MPC is not separate**: Don't treat MPC as Layer 2 or any other layer
+2. **Depends on Layer 2**: Needs faucet for account setup
+3. **Real infrastructure**: Runs real MPC nodes, not mocks
+4. **Dynamic values only**: Never hardcode AWS IDs, IPs, or keys
+
+## Troubleshooting
+
+See `near-localnet-orchestrator/docs/lessons-learned/NEAR_LOCALNET_LESSONS_LEARNED.md`:
+- GOTCHA #10-15.9: MPC sync, secrets, boot nodes, genesis, key mismatches
+- GOTCHA #37-39: Account creation, domain voting, contract storage
+- Full Stack Reset Procedure (line 1100+)

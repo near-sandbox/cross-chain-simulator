@@ -1,3 +1,12 @@
+---
+alwaysApply: false
+description: MPC runtime stability guardrails - debugging and secrets management
+globs:
+  - "**/mpc-repo/**/*.ts"
+  - "**/mpc-repo/**/*.sh"
+  - "**/mpc-repo/**/*.json"
+---
+
 ## Layer 3 Guardrails: MPC Runtime Stability Only (NO architecture changes)
 
 ### Objective (single goal)
@@ -11,6 +20,27 @@ Only work that directly makes MPC nodes healthy:
 - MPC node **UserData/bootstrap** in `cross-chain-simulator/mpc-repo/infra/aws-cdk`
 - MPC node **IAM permissions** required for runtime (e.g. Cloud Map registration)
 - MPC node **runtime config inputs** (secrets retrieval, boot nodes, genesis download)
+
+### CRITICAL: MPC Secrets Management
+
+**MPC nodes require three secrets from AWS Secrets Manager:**
+- `mpc-node-{i}-mpc_account_sk` - NEAR account secret key
+- `mpc-node-{i}-mpc_p2p_private_key` - P2P network key
+- `mpc-node-{i}-mpc_secret_store_key` - Encryption key for local storage
+
+**These secrets are ONLY fetched during CDK UserData execution on first boot.**
+
+When restarting MPC containers via SSM (e.g., for reset/recovery):
+1. **DO NOT** pass `$MPC_ACCOUNT_SK`, `$MPC_P2P_PRIVATE_KEY`, `$MPC_SECRET_STORE_KEY` directly - they are undefined in SSM context
+2. **MUST** fetch secrets from AWS Secrets Manager before starting the container:
+   ```bash
+   MPC_ACCOUNT_SK=$(aws secretsmanager get-secret-value --secret-id "mpc-node-${NODE_INDEX}-mpc_account_sk" --region us-east-1 --query SecretString --output text | tr -d '\n')
+   MPC_P2P_PRIVATE_KEY=$(aws secretsmanager get-secret-value --secret-id "mpc-node-${NODE_INDEX}-mpc_p2p_private_key" --region us-east-1 --query SecretString --output text | tr -d '\n')
+   MPC_SECRET_STORE_KEY=$(aws secretsmanager get-secret-value --secret-id "mpc-node-${NODE_INDEX}-mpc_secret_store_key" --region us-east-1 --query SecretString --output text | tr -d '\n')
+   ```
+3. The reset script at `/opt/mpc/reset-mpc-node.sh` handles this automatically
+
+**Failure mode:** If secrets are empty, the container will crash with `invalid local storage aes key hex` error.
 
 ### Explicit non-goals (forbidden unless user explicitly approves)
 Do NOT:
@@ -31,3 +61,78 @@ Before any code change, capture (per MPC node instance):
 - All MPC nodes: `curl -sf http://127.0.0.1:8080/health` returns 200 (SSM into node)
 - From NEAR base EC2: `curl -sf http://<mpc-private-ip>:8080/health` returns 200 for each node
 
+### CRITICAL: Dynamic Value Discovery (NEVER hardcode AWS values)
+
+**Do NOT hardcode** instance IDs, IPs, public keys, or ARNs in documentation or scripts. Always discover dynamically.
+
+#### How to Find Infrastructure Values
+
+**NEAR Base Instance ID:**
+```bash
+aws cloudformation describe-stacks --stack-name near-localnet-infrastructure --profile shai-sandbox-profile --region us-east-1 --query "Stacks[0].Outputs[?OutputKey=='near-instance-id'].OutputValue" --output text
+```
+
+**NEAR Base Private IP:**
+```bash
+aws cloudformation describe-stacks --stack-name near-localnet-infrastructure --profile shai-sandbox-profile --region us-east-1 --query "Stacks[0].Outputs[?OutputKey=='near-instance-private-ip'].OutputValue" --output text
+```
+
+**NEAR Base node_key (for MPC boot_nodes):**
+```bash
+# SSM into NEAR Base instance, then:
+cat /home/ubuntu/.near/localnet/node0/node_key.json | jq -r .public_key
+# Result format: ed25519:XXXXXX
+```
+
+**MPC Node Instance IDs:**
+```bash
+for i in 0 1 2; do
+  aws cloudformation describe-stacks --stack-name MpcStandaloneStack --profile shai-sandbox-profile --region us-east-1 --query "Stacks[0].Outputs[?contains(OutputKey,'Node${i}InstanceId')].OutputValue" --output text
+done
+```
+
+**MPC Node Private IPs:**
+```bash
+for i in 0 1 2; do
+  aws cloudformation describe-stacks --stack-name MpcStandaloneStack --profile shai-sandbox-profile --region us-east-1 --query "Stacks[0].Outputs[?contains(OutputKey,'Node${i}PrivateIp')].OutputValue" --output text
+done
+```
+
+**MPC Node sign_pk (from running MPC nodes):**
+```bash
+# Replace <mpc-ip> with actual MPC node private IP
+curl -s http://<mpc-ip>:8080/public_data | jq -r .near_signer_public_key
+```
+
+**NEAR localnet chain_id:**
+```bash
+curl -s http://<near-rpc-ip>:3030/status | jq -r .chain_id
+```
+
+#### Pre-Flight Verification Checklist
+
+Before any Layer 3 work, verify these values match:
+
+1. **Boot nodes public key** (in MPC `/data/config.json`) must match **NEAR Base node_key**:
+   ```bash
+   # On MPC node:
+   cat /data/config.json | jq -r .network.boot_nodes
+   # On NEAR Base:
+   cat /home/ubuntu/.near/localnet/node0/node_key.json | jq -r .public_key
+   ```
+
+2. **Genesis chain_id** must match between MPC and NEAR Base:
+   ```bash
+   # On MPC node:
+   cat /data/genesis.json | jq -r .chain_id
+   # On NEAR Base:
+   curl -s http://127.0.0.1:3030/status | jq -r .chain_id
+   ```
+
+3. **MPC sign_pk** (from `/public_data`) must match **Secrets Manager key**:
+   ```bash
+   # Actual sign_pk on MPC node:
+   curl -s http://<mpc-ip>:8080/public_data | jq -r .near_signer_public_key
+   # Expected from Secrets Manager (derive public from private):
+   # Compare with output from: near account get-public-key from-plaintext-private-key <key>
+   ```

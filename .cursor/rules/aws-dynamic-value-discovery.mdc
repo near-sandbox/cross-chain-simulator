@@ -1,0 +1,172 @@
+---
+alwaysApply: false
+description: AWS dynamic value discovery - NEVER hardcode infrastructure values
+globs:
+  - "**/infra/**/*.ts"
+  - "**/scripts/**/*.sh"
+  - "**/*.mdc"
+---
+
+## AWS Dynamic Value Discovery (NEVER hardcode infrastructure values)
+
+### Core Principle
+
+**Do NOT hardcode** instance IDs, IPs, public keys, ARNs, or any AWS-specific values in documentation, scripts, or cursor rules. Always discover dynamically from CloudFormation outputs or live infrastructure.
+
+**Exception:** Dependency versions (package.json, Cargo.toml) are appropriate to pin.
+
+### Infrastructure Value Discovery Commands
+
+All commands use `--profile shai-sandbox-profile --region us-east-1`.
+
+#### NEAR Base (Layer 1)
+
+**Instance ID:**
+```bash
+aws cloudformation describe-stacks --stack-name near-localnet-infrastructure \
+  --query "Stacks[0].Outputs[?OutputKey=='near-instance-id'].OutputValue" --output text
+```
+
+**Private IP:**
+```bash
+aws cloudformation describe-stacks --stack-name near-localnet-infrastructure \
+  --query "Stacks[0].Outputs[?OutputKey=='near-instance-private-ip'].OutputValue" --output text
+```
+
+**RPC URL:**
+```bash
+NEAR_IP=$(aws cloudformation describe-stacks --stack-name near-localnet-infrastructure \
+  --query "Stacks[0].Outputs[?OutputKey=='near-instance-private-ip'].OutputValue" --output text)
+echo "http://${NEAR_IP}:3030"
+```
+
+**node_key (for MPC boot_nodes):** SSM into NEAR Base, then:
+```bash
+cat /home/ubuntu/.near/localnet/node0/node_key.json | jq -r .public_key
+```
+
+**chain_id:**
+```bash
+curl -s http://<near-ip>:3030/status | jq -r .chain_id
+```
+
+#### MPC Nodes (Layer 3)
+
+**All MPC Outputs:**
+```bash
+aws cloudformation describe-stacks --stack-name MpcStandaloneStack \
+  --query "Stacks[0].Outputs[].{Key:OutputKey,Value:OutputValue}" --output table
+```
+
+**MPC Instance IDs:**
+```bash
+aws cloudformation describe-stacks --stack-name MpcStandaloneStack \
+  --query "Stacks[0].Outputs[?contains(OutputKey,'InstanceId')].{Key:OutputKey,Value:OutputValue}" --output table
+```
+
+**MPC Private IPs:**
+```bash
+aws cloudformation describe-stacks --stack-name MpcStandaloneStack \
+  --query "Stacks[0].Outputs[?contains(OutputKey,'PrivateIp')].{Key:OutputKey,Value:OutputValue}" --output table
+```
+
+**MPC sign_pk (from running node):**
+```bash
+curl -s http://<mpc-private-ip>:8080/public_data | jq -r .near_signer_public_key
+```
+
+**MPC secrets.json key (on MPC instance):**
+```bash
+cat /data/secrets.json | jq -r .near_signer_key
+```
+
+**MPC boot_nodes config (on MPC instance):**
+```bash
+cat /data/config.json | jq -r .network.boot_nodes
+```
+
+#### Secrets Manager
+
+**List MPC secrets:**
+```bash
+aws secretsmanager list-secrets --filter "Key=name,Values=mpc-node" \
+  --query "SecretList[].Name" --output table
+```
+
+**Get secret value:**
+```bash
+aws secretsmanager get-secret-value --secret-id "mpc-node-0-mpc_account_sk" \
+  --query "SecretString" --output text
+```
+
+#### SSM Parameter Store
+
+**List NEAR localnet parameters:**
+```bash
+aws ssm get-parameters-by-path --path "/near-localnet/" --query "Parameters[].Name" --output table
+```
+
+**Get parameter:**
+```bash
+aws ssm get-parameter --name "/near-localnet/localnet-account-key" --with-decryption \
+  --query "Parameter.Value" --output text
+```
+
+### Pre-Flight Verification Checklist
+
+Before any Layer 3 debugging, verify these values match:
+
+#### 1. Boot nodes public key = NEAR Base node_key
+
+```bash
+# On MPC node (via SSM):
+MPC_BOOT_KEY=$(cat /data/config.json | jq -r '.network.boot_nodes' | cut -d'@' -f1)
+echo "MPC boot_nodes key: $MPC_BOOT_KEY"
+
+# On NEAR Base (via SSM):
+NEAR_NODE_KEY=$(cat /home/ubuntu/.near/localnet/node0/node_key.json | jq -r .public_key)
+echo "NEAR Base node_key: $NEAR_NODE_KEY"
+
+# Compare - must match!
+```
+
+**If mismatch:** MPC nodes cannot connect to NEAR localnet (0 peers, stuck at block #0). Redeploy MPC stack with correct `nearBootNodes` context.
+
+#### 2. Genesis chain_id matches
+
+```bash
+# On MPC node:
+MPC_CHAIN=$(cat /data/genesis.json | jq -r .chain_id)
+
+# On NEAR Base:
+NEAR_CHAIN=$(curl -s http://127.0.0.1:3030/status | jq -r .chain_id)
+
+# Compare
+echo "MPC: $MPC_CHAIN | NEAR: $NEAR_CHAIN"
+```
+
+**If mismatch:** MPC nodes reject NEAR Base as peer. MPC needs correct genesis from S3.
+
+#### 3. MPC sign_pk = Secrets Manager key
+
+```bash
+# Actual sign_pk on MPC node:
+ACTUAL=$(curl -s http://<mpc-ip>:8080/public_data | jq -r .near_signer_public_key)
+
+# Expected (derive public from private):
+PRIVATE=$(aws secretsmanager get-secret-value --secret-id "mpc-node-0-mpc_account_sk" --query SecretString --output text)
+# Then use near-cli-rs to derive public key from private
+
+echo "Actual: $ACTUAL"
+```
+
+**If mismatch:** MPC node generated its own key instead of using Secrets Manager (timing/race condition on first boot). Fix by updating `/data/secrets.json` with correct key.
+
+### Common Failure Modes
+
+| Symptom | Cause | Discovery Command | Fix |
+|---------|-------|-------------------|-----|
+| MPC 0 peers, block #0 | Wrong boot_nodes key | Compare `config.json` boot_nodes with NEAR node_key | Redeploy MPC with correct nearBootNodes |
+| MPC genesis mismatch | Wrong genesis file | Compare chain_id on both | Redeploy MPC with correct genesis from S3 |
+| sign_pk mismatch | Race condition on boot | Compare `/public_data` with Secrets Manager | Update `/data/secrets.json` |
+| Container crash: "invalid local storage aes key" | Missing secrets | Check if secrets.json has valid keys | Fetch from Secrets Manager |
